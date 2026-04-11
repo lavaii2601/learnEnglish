@@ -9,6 +9,15 @@ const PORT = Number(process.env.PORT || 3001)
 app.use(cors())
 app.use(express.json())
 
+// Vercel can forward requests as /resource instead of /api/resource in some setups.
+app.use((req, _, next) => {
+  const currentUrl = String(req.url || '/').trim()
+  if (!currentUrl.startsWith('/api')) {
+    req.url = `/api${currentUrl.startsWith('/') ? '' : '/'}${currentUrl}`
+  }
+  next()
+})
+
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 const supabase = supabaseUrl && supabaseKey
@@ -707,6 +716,12 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
   } catch (error) {
     next(error)
   }
+})
+
+app.use((req, res) => {
+  res.status(404).json({
+    message: `Không tìm thấy endpoint API: ${req.method} ${req.originalUrl}`,
+  })
 })
 
 app.use((error, _, res, __) => {
