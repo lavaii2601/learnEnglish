@@ -1230,8 +1230,22 @@ function renderManagedQuestions() {
 
 function renderSourceQuestion() {
   const questionAnswerList = state.database.questions.mcq || []
-  const writingQuestionList = state.database.questions.writing || []
-  const listingQuestionList = state.database.questions.listing || []
+  const writingQuestionList = (state.database.questions.writing || []).map((item) => ({
+    id: item.id,
+    questionType: 'writing',
+    prompt: item.word,
+    hint: item.hint,
+    answers: item.keywords || [],
+  }))
+  const listingQuestionList = (state.database.questions.listing || []).map((item) => ({
+    id: item.id,
+    questionType: 'listing',
+    prompt: item.prompt,
+    hint: item.hint,
+    answers: item.answers || [],
+  }))
+  const sharedListQuestions = [...writingQuestionList, ...listingQuestionList]
+    .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))
 
   return `
     <section class="page-card">
@@ -1243,24 +1257,20 @@ function renderSourceQuestion() {
         <button type="submit">Lưu câu hỏi vào cơ sở dữ liệu</button>
       </form>
 
-      <h3>Thêm đề viết (mỗi dòng là 1 đáp án mẫu)</h3>
-      <form id="writing-question-form" class="stack-form">
-        <label>Từ cần định nghĩa<input name="word" required placeholder="resilient" /></label>
-        <label>Gợi ý<input name="hint" required placeholder="Giải thích nghĩa và cho ví dụ ngắn" /></label>
+      <h3>Câu hỏi liệt kê (dùng chung cho Viết và Liệt kê)</h3>
+      <form id="shared-list-question-form" class="stack-form">
         <label>
-          Đáp án mẫu theo dòng
-          <textarea name="keywordsText" rows="5" required placeholder="- recover quickly after difficulties&#10;- stay strong under pressure&#10;- bounce back from problems"></textarea>
+          Dùng cho bài tập
+          <select name="targetType" required>
+            <option value="listing">Liệt kê ý</option>
+            <option value="writing">Viết định nghĩa</option>
+          </select>
         </label>
-        <button type="submit">Lưu đề viết</button>
-      </form>
-
-      <h3>Thêm câu hỏi liệt kê</h3>
-      <form id="listing-question-form" class="stack-form">
-        <label>Câu hỏi liệt kê<input name="prompt" required placeholder="Liệt kê 3 lợi ích của việc đọc sách" /></label>
+        <label>Nội dung câu hỏi / từ cần định nghĩa<input name="prompt" required placeholder="Liệt kê 3 lợi ích của việc đọc sách hoặc từ resilient" /></label>
         <label>Gợi ý<input name="hint" placeholder="Mỗi dòng một ý ngắn" /></label>
         <label>
           Đáp án mẫu theo dòng
-          <textarea name="answersText" rows="5" required placeholder="- improves vocabulary&#10;- reduces stress&#10;- expands knowledge"></textarea>
+          <textarea name="answersText" rows="5" required placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3"></textarea>
         </label>
         <button type="submit">Lưu câu hỏi liệt kê</button>
       </form>
@@ -1287,50 +1297,28 @@ function renderSourceQuestion() {
           : '<p class="muted">Chưa có câu hỏi/câu trả lời nào.</p>'}
       </div>
 
-      <h3>Quản lý đề viết (sửa/xóa)</h3>
+      <h3>Quản lý câu hỏi liệt kê dùng chung (sửa/xóa)</h3>
       <div class="manage-list">
-        ${writingQuestionList.length
-          ? writingQuestionList
-            .map(
-              (item) => `
-                <article class="manage-card">
-                  <div>
-                    <strong>${escapeHtml(item.word)}</strong>
-                    <p>${escapeHtml(item.hint)}</p>
-                    <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml((item.keywords || []).join(' | '))}</p>
-                  </div>
-                  <div class="row-actions">
-                    <button class="small-btn" data-edit-writing-question="${item.id}">Sửa</button>
-                    <button class="small-btn danger" data-delete-writing-question="${item.id}">Xóa</button>
-                  </div>
-                </article>
-              `,
-            )
-            .join('')
-          : '<p class="muted">Chưa có đề viết nào.</p>'}
-      </div>
-
-      <h3>Quản lý câu hỏi liệt kê (sửa/xóa)</h3>
-      <div class="manage-list">
-        ${listingQuestionList.length
-          ? listingQuestionList
+        ${sharedListQuestions.length
+          ? sharedListQuestions
             .map(
               (item) => `
                 <article class="manage-card">
                   <div>
                     <strong>${escapeHtml(item.prompt)}</strong>
-                    <p>${escapeHtml(item.hint || '')}</p>
+                    <p>${escapeHtml(item.hint)}</p>
+                    <p class="muted">Dùng cho: ${item.questionType === 'writing' ? 'Viết định nghĩa' : 'Liệt kê ý'}</p>
                     <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml((item.answers || []).join(' | '))}</p>
                   </div>
                   <div class="row-actions">
-                    <button class="small-btn" data-edit-listing-question="${item.id}">Sửa</button>
-                    <button class="small-btn danger" data-delete-listing-question="${item.id}">Xóa</button>
+                    <button class="small-btn" data-edit-shared-list-question="${item.questionType}:${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-shared-list-question="${item.questionType}:${item.id}">Xóa</button>
                   </div>
                 </article>
               `,
             )
             .join('')
-          : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
+          : '<p class="muted">Chưa có câu hỏi liệt kê dùng chung nào.</p>'}
       </div>
 
       ${renderSourceMessage()}
@@ -1674,42 +1662,18 @@ function attachSourceEvents() {
     })
   }
 
-  const writingQuestionForm = document.querySelector('#writing-question-form')
-  if (writingQuestionForm) {
-    writingQuestionForm.addEventListener('submit', (event) => {
+  const sharedListQuestionForm = document.querySelector('#shared-list-question-form')
+  if (sharedListQuestionForm) {
+    sharedListQuestionForm.addEventListener('submit', (event) => {
       event.preventDefault()
-      const formData = new FormData(writingQuestionForm)
-      const keywords = parseWritingSampleLines(formData.get('keywordsText'))
-      if (!keywords.length) {
-        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho đề viết.'
-        state.sourceMessageType = 'error'
-        render()
-        return
-      }
-
-      withRefresh(
-        async () => {
-          await createQuestion({
-            type: 'writing',
-            word: formData.get('word').trim(),
-            hint: formData.get('hint').trim(),
-            keywords,
-          })
-          writingQuestionForm.reset()
-        },
-        'Đã lưu đề viết.',
-      )
-    })
-  }
-
-  const listingQuestionForm = document.querySelector('#listing-question-form')
-  if (listingQuestionForm) {
-    listingQuestionForm.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const formData = new FormData(listingQuestionForm)
+      const formData = new FormData(sharedListQuestionForm)
+      const targetType = String(formData.get('targetType') || 'listing').trim()
+      const prompt = String(formData.get('prompt') || '').trim()
+      const hint = String(formData.get('hint') || '').trim()
       const answers = parseWritingSampleLines(formData.get('answersText'))
+
       if (!answers.length) {
-        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê.'
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê dùng chung.'
         state.sourceMessageType = 'error'
         render()
         return
@@ -1717,15 +1681,24 @@ function attachSourceEvents() {
 
       withRefresh(
         async () => {
-          await createQuestion({
-            type: 'listing',
-            prompt: formData.get('prompt').trim(),
-            hint: (formData.get('hint') || '').trim(),
-            answers,
-          })
-          listingQuestionForm.reset()
+          if (targetType === 'writing') {
+            await createQuestion({
+              type: 'writing',
+              word: prompt,
+              hint,
+              keywords: answers,
+            })
+          } else {
+            await createQuestion({
+              type: 'listing',
+              prompt,
+              hint,
+              answers,
+            })
+          }
+          sharedListQuestionForm.reset()
         },
-        'Đã lưu câu hỏi liệt kê.',
+        'Đã lưu câu hỏi liệt kê dùng chung.',
       )
     })
   }
@@ -1770,94 +1743,51 @@ function attachSourceEvents() {
     })
   })
 
-  document.querySelectorAll('[data-delete-writing-question]').forEach((button) => {
+  document.querySelectorAll('[data-delete-shared-list-question]').forEach((button) => {
     button.addEventListener('click', () => {
-      const id = Number(button.dataset.deleteWritingQuestion)
+      const token = String(button.dataset.deleteSharedListQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
       if (!id) return
 
       withRefresh(
         async () => {
-          await deleteQuestion('writing', id)
+          await deleteQuestion(questionType === 'writing' ? 'writing' : 'listing', id)
         },
-        'Đã xóa đề viết.',
+        'Đã xóa câu hỏi liệt kê dùng chung.',
       )
     })
   })
 
-  document.querySelectorAll('[data-edit-writing-question]').forEach((button) => {
+  document.querySelectorAll('[data-edit-shared-list-question]').forEach((button) => {
     button.addEventListener('click', () => {
-      const id = Number(button.dataset.editWritingQuestion)
+      const token = String(button.dataset.editSharedListQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
       if (!id) return
 
-      const item = (state.database.questions.writing || []).find((entry) => entry.id === id)
+      const sourceList = questionType === 'writing'
+        ? (state.database.questions.writing || [])
+        : (state.database.questions.listing || [])
+      const item = sourceList.find((entry) => entry.id === id)
       if (!item) return
 
-      const word = window.prompt('Từ cần định nghĩa', item.word)
-      if (word === null) return
-      const hint = window.prompt('Gợi ý', item.hint)
-      if (hint === null) return
-      const keywordsText = window.prompt(
-        'Đáp án mẫu theo dòng (mỗi dòng 1 đáp án)',
-        (item.keywords || []).join('\n'),
-      )
-      if (keywordsText === null) return
+      const currentPrompt = questionType === 'writing' ? item.word : item.prompt
+      const currentAnswers = questionType === 'writing' ? item.keywords : item.answers
 
-      const keywords = parseWritingSampleLines(keywordsText)
-      if (!keywords.length) {
-        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho đề viết.'
-        state.sourceMessageType = 'error'
-        render()
-        return
-      }
-
-      withRefresh(
-        async () => {
-          await updateQuestion('writing', id, {
-            word: word.trim(),
-            hint: hint.trim(),
-            keywords,
-          })
-        },
-        'Đã cập nhật đề viết.',
-      )
-    })
-  })
-
-  document.querySelectorAll('[data-delete-listing-question]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.deleteListingQuestion)
-      if (!id) return
-
-      withRefresh(
-        async () => {
-          await deleteQuestion('listing', id)
-        },
-        'Đã xóa câu hỏi liệt kê.',
-      )
-    })
-  })
-
-  document.querySelectorAll('[data-edit-listing-question]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.editListingQuestion)
-      if (!id) return
-
-      const item = (state.database.questions.listing || []).find((entry) => entry.id === id)
-      if (!item) return
-
-      const prompt = window.prompt('Câu hỏi liệt kê', item.prompt)
+      const prompt = window.prompt('Nội dung câu hỏi / từ cần định nghĩa', currentPrompt)
       if (prompt === null) return
       const hint = window.prompt('Gợi ý', item.hint || '')
       if (hint === null) return
       const answersText = window.prompt(
         'Đáp án mẫu theo dòng (mỗi dòng 1 đáp án)',
-        (item.answers || []).join('\n'),
+        (currentAnswers || []).join('\n'),
       )
       if (answersText === null) return
 
       const answers = parseWritingSampleLines(answersText)
       if (!answers.length) {
-        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê.'
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê dùng chung.'
         state.sourceMessageType = 'error'
         render()
         return
@@ -1865,13 +1795,21 @@ function attachSourceEvents() {
 
       withRefresh(
         async () => {
-          await updateQuestion('listing', id, {
-            prompt: prompt.trim(),
-            hint: hint.trim(),
-            answers,
-          })
+          if (questionType === 'writing') {
+            await updateQuestion('writing', id, {
+              word: prompt.trim(),
+              hint: hint.trim(),
+              keywords: answers,
+            })
+          } else {
+            await updateQuestion('listing', id, {
+              prompt: prompt.trim(),
+              hint: hint.trim(),
+              answers,
+            })
+          }
         },
-        'Đã cập nhật câu hỏi liệt kê.',
+        'Đã cập nhật câu hỏi liệt kê dùng chung.',
       )
     })
   })
