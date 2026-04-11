@@ -41,6 +41,9 @@ export function fetchDatabase(options = {}) {
   if (options.mcqMode) {
     params.set('mcqMode', options.mcqMode)
   }
+  if (options.fresh) {
+    params.set('fresh', '1')
+  }
   const query = params.toString()
   return request(`/api/database${query ? `?${query}` : ''}`)
 }
