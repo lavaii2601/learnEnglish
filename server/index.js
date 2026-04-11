@@ -527,6 +527,20 @@ app.delete('/api/vocabulary/:id', async (req, res, next) => {
   }
 })
 
+app.post('/api/vocabulary/:id/delete', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id)
+    if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
+
+    const { error } = await supabase.from('vocabulary').delete().eq('id', id)
+    assertNoSupabaseError(error, 'Không thể xóa từ vựng')
+
+    return res.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.post('/api/questions', async (req, res, next) => {
   try {
     const questionText = String(req.body.question || '').trim()
@@ -704,6 +718,39 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
 })
 
 app.delete('/api/questions/:type/:id', async (req, res, next) => {
+  try {
+    const type = toQuestionType(req.params.type)
+    const id = Number(req.params.id)
+
+    if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
+
+    if (type === 'mcq') {
+      const { error } = await supabase.from('mcq_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi trắc nghiệm')
+    }
+
+    if (type === 'matching') {
+      const { error } = await supabase.from('matching_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi nối từ')
+    }
+
+    if (type === 'fillBlank') {
+      const { error } = await supabase.from('fill_blank_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi điền chỗ trống')
+    }
+
+    if (type === 'writing') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
+    }
+
+    return res.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
   try {
     const type = toQuestionType(req.params.type)
     const id = Number(req.params.id)

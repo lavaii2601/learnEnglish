@@ -26,6 +26,16 @@ async function request(path, options = {}) {
   return response.json()
 }
 
+async function requestWithDeleteFallback(path, fallbackPath) {
+  try {
+    return await request(path, { method: 'DELETE' })
+  } catch (error) {
+    const is404 = /HTTP\s+404/i.test(String(error?.message || ''))
+    if (!is404) throw error
+    return request(fallbackPath, { method: 'POST' })
+  }
+}
+
 export function fetchDatabase(options = {}) {
   const params = new URLSearchParams()
   if (options.mcqMode) {
@@ -50,9 +60,10 @@ export function updateVocabulary(id, payload) {
 }
 
 export function deleteVocabulary(id) {
-  return request(`/api/vocabulary/${id}`, {
-    method: 'DELETE',
-  })
+  return requestWithDeleteFallback(
+    `/api/vocabulary/${id}`,
+    `/api/vocabulary/${id}/delete`,
+  )
 }
 
 export function createQuestion(payload) {
@@ -70,7 +81,8 @@ export function updateQuestion(type, id, payload) {
 }
 
 export function deleteQuestion(type, id) {
-  return request(`/api/questions/${type}/${id}`, {
-    method: 'DELETE',
-  })
+  return requestWithDeleteFallback(
+    `/api/questions/${type}/${id}`,
+    `/api/questions/${type}/${id}/delete`,
+  )
 }
