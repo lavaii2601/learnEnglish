@@ -55,6 +55,19 @@ body {
   animation: pageSlideIn var(--motion-slow) cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.brand-logo {
+  display: block;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 2px solid #b7c4d6;
+  box-shadow: 0 8px 22px rgba(31, 41, 55, 0.14);
+}
+
+.landing-logo {
+  width: clamp(92px, 15vw, 132px);
+  height: clamp(92px, 15vw, 132px);
+}
+
 .landing-eyebrow {
   color: #5b6472;
   text-transform: uppercase;
@@ -127,6 +140,12 @@ body {
   transition:
     transform var(--motion-mid) cubic-bezier(0.22, 1, 0.36, 1),
     opacity var(--motion-mid) ease;
+}
+
+.sidebar-logo {
+  width: 86px;
+  height: 86px;
+  margin-bottom: 2px;
 }
 
 .shell.menu-hidden .sidebar {
@@ -854,6 +873,11 @@ textarea:focus-visible {
     flex-direction: column;
   }
 
+  .landing-logo {
+    width: 88px;
+    height: 88px;
+  }
+
   .landing-actions .action-btn,
   .landing-actions .small-btn {
     width: 100%;
@@ -884,6 +908,11 @@ textarea:focus-visible {
     z-index: 30;
     transform: translateX(0);
     opacity: 1;
+  }
+
+  .sidebar-logo {
+    width: 76px;
+    height: 76px;
   }
 
   .shell.menu-hidden .sidebar {

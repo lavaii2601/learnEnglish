@@ -609,6 +609,12 @@ function renderLayout(content) {
   return `
     <main class="shell app-shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
       <aside class="sidebar">
+        <img
+          class="brand-logo sidebar-logo"
+          src="/logo.jpg"
+          alt="Logo Học tiếng Anh cùng Hồng Nga"
+          onerror="this.style.display='none'"
+        />
         <h1>Học tiếng Anh cùng Hồng Nga</h1>
         <p class="muted">Luyện tập và quản lý dữ liệu học tiếng Anh.</p>
 
@@ -701,6 +707,12 @@ function renderLandingPage() {
   return `
     <main class="landing-shell">
       <section class="landing-card">
+        <img
+          class="brand-logo landing-logo"
+          src="/logo.jpg"
+          alt="Logo Học tiếng Anh cùng Hồng Nga"
+          onerror="this.style.display='none'"
+        />
         <p class="landing-eyebrow">Học tiếng Anh cùng Hồng Nga</p>
         <h1>Luyện tiếng Anh 5 cùng Hồng Nga</h1>
         <p class="landing-subtitle">Bắt đầu nhanh với bộ bài tập và trang quản lý dữ liệu học tập.</p>
