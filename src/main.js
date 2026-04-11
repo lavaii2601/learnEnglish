@@ -472,9 +472,12 @@ async function refreshDatabase(options = {}) {
 
   let payload
   if (state.route === '/exercise/mcq') {
-    payload = await fetchDatabase({ mcqMode: state.mcqSourceMode })
+    payload = await fetchDatabase({
+      mcqMode: state.mcqSourceMode,
+      fresh: force,
+    })
   } else {
-    payload = await fetchDatabase()
+    payload = await fetchDatabase({ fresh: force })
   }
 
   state.database = payload
