@@ -10,7 +10,7 @@
 - Trắc nghiệm
 - Nối từ với định nghĩa
 - Điền vào chỗ trống
-- Viết định nghĩa (chấm theo từ khóa)
+- Viết định nghĩa (mỗi dòng là 1 đáp án, chấm không cần đúng thứ tự)
 
 Tất cả bài tập đều truy xuất đáp án đúng từ Supabase thông qua backend API.
 
@@ -34,7 +34,7 @@ Cấu trúc gồm:
 - questions.mcq: câu hỏi trắc nghiệm
 - questions.matching: cặp nối từ
 - questions.fillBlank: câu điền chỗ trống
-- questions.writing: đề viết + từ khóa
+- questions.writing: đề viết + danh sách đáp án mẫu theo dòng
 
 ## Công nghệ
 

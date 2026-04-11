@@ -86,6 +86,37 @@ function normalizeText(text) {
   return text.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+function cleanListLine(text) {
+  return String(text || '')
+    .replace(/^\s*(?:[-*•]|\d+[.)-])\s*/, '')
+    .replace(/[;,.!?]+$/g, '')
+    .trim()
+}
+
+function normalizeListLine(text) {
+  return normalizeText(cleanListLine(text))
+}
+
+function parseAnswerLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => normalizeListLine(line))
+    .filter(Boolean)
+}
+
+function parseWritingSampleLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => cleanListLine(line))
+    .filter(Boolean)
+}
+
+function linesMatch(userLine, expectedLine) {
+  if (!userLine || !expectedLine) return false
+  if (userLine === expectedLine) return true
+  return userLine.includes(expectedLine) || expectedLine.includes(userLine)
+}
+
 function escapeHtml(value) {
   return value
     .replaceAll('&', '&amp;')
@@ -268,15 +299,37 @@ function scoreBlanks() {
 
 function scoreWriting() {
   return state.database.questions.writing.map((item, index) => {
-    const userText = normalizeText(state.writingAnswers[index] || '')
-    const hitCount = item.keywords.filter((keyword) => userText.includes(keyword)).length
-    const percent = item.keywords.length
-      ? Math.round((hitCount / item.keywords.length) * 100)
+    const expectedLines = (Array.isArray(item.keywords) ? item.keywords : [])
+      .map((line) => normalizeListLine(line))
+      .filter(Boolean)
+    const userLines = parseAnswerLines(state.writingAnswers[index] || '')
+
+    const remainingUserLines = [...userLines]
+    let hitCount = 0
+
+    expectedLines.forEach((expectedLine) => {
+      const exactIndex = remainingUserLines.findIndex((line) => line === expectedLine)
+      if (exactIndex >= 0) {
+        hitCount += 1
+        remainingUserLines.splice(exactIndex, 1)
+        return
+      }
+
+      const fuzzyIndex = remainingUserLines.findIndex((line) => linesMatch(line, expectedLine))
+      if (fuzzyIndex >= 0) {
+        hitCount += 1
+        remainingUserLines.splice(fuzzyIndex, 1)
+      }
+    })
+
+    const totalExpected = expectedLines.length
+    const percent = totalExpected
+      ? Math.round((hitCount / totalExpected) * 100)
       : 0
 
     return {
       hitCount,
-      total: item.keywords.length,
+      total: totalExpected,
       percent,
     }
   })
@@ -805,8 +858,9 @@ function renderWritingPage() {
                 <span class="question-text">${escapeHtml(item.word)}</span>
               </h3>
               <p class="question-hint">${escapeHtml(item.hint)}</p>
-              <textarea data-writing-index="${index}" rows="4" placeholder="Viết định nghĩa của bạn...">${escapeHtml(state.writingAnswers[index] || '')}</textarea>
-              <p class="muted">Độ khớp từ khóa: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
+              <p class="muted">Mỗi dòng là 1 ý/1 đáp án. Có thể dùng -, *, hoặc số thứ tự. Không cần đúng thứ tự.</p>
+              <textarea data-writing-index="${index}" rows="5" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.writingAnswers[index] || '')}</textarea>
+              <p class="muted">Độ khớp theo dòng: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
             </article>
           `,
         )
@@ -934,7 +988,7 @@ function renderManagedQuestions() {
           <div>
             <strong>${escapeHtml(item.word)}</strong>
             <p>${escapeHtml(item.hint)}</p>
-            <p class="muted">Từ khóa: ${escapeHtml(item.keywords.join(', '))}</p>
+            <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml(item.keywords.join(' | '))}</p>
           </div>
           <div class="row-actions">
             <button class="small-btn" data-edit-question="${type}:${item.id}">Sửa</button>
@@ -948,6 +1002,7 @@ function renderManagedQuestions() {
 
 function renderSourceQuestion() {
   const questionAnswerList = state.database.questions.mcq || []
+  const writingQuestionList = state.database.questions.writing || []
 
   return `
     <section class="page-card">
@@ -957,6 +1012,17 @@ function renderSourceQuestion() {
         <label>Câu hỏi<input name="question" required placeholder="Ví dụ: Nghĩa của từ resilient là gì?" /></label>
         <label>Đáp án đúng<input name="answer" required placeholder="Có khả năng phục hồi nhanh sau khó khăn" /></label>
         <button type="submit">Lưu câu hỏi vào cơ sở dữ liệu</button>
+      </form>
+
+      <h3>Thêm đề viết (mỗi dòng là 1 đáp án mẫu)</h3>
+      <form id="writing-question-form" class="stack-form">
+        <label>Từ cần định nghĩa<input name="word" required placeholder="resilient" /></label>
+        <label>Gợi ý<input name="hint" required placeholder="Giải thích nghĩa và cho ví dụ ngắn" /></label>
+        <label>
+          Đáp án mẫu theo dòng
+          <textarea name="keywordsText" rows="5" required placeholder="- recover quickly after difficulties&#10;- stay strong under pressure&#10;- bounce back from problems"></textarea>
+        </label>
+        <button type="submit">Lưu đề viết</button>
       </form>
 
       <h3>Quản lý câu hỏi/câu trả lời (sửa/xóa)</h3>
@@ -979,6 +1045,29 @@ function renderSourceQuestion() {
             )
             .join('')
           : '<p class="muted">Chưa có câu hỏi/câu trả lời nào.</p>'}
+      </div>
+
+      <h3>Quản lý đề viết (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${writingQuestionList.length
+          ? writingQuestionList
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <strong>${escapeHtml(item.word)}</strong>
+                    <p>${escapeHtml(item.hint)}</p>
+                    <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml((item.keywords || []).join(' | '))}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button class="small-btn" data-edit-writing-question="${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-writing-question="${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có đề viết nào.</p>'}
       </div>
 
       ${renderSourceMessage()}
@@ -1295,6 +1384,34 @@ function attachSourceEvents() {
     })
   }
 
+  const writingQuestionForm = document.querySelector('#writing-question-form')
+  if (writingQuestionForm) {
+    writingQuestionForm.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const formData = new FormData(writingQuestionForm)
+      const keywords = parseWritingSampleLines(formData.get('keywordsText'))
+      if (!keywords.length) {
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho đề viết.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      withRefresh(
+        async () => {
+          await createQuestion({
+            type: 'writing',
+            word: formData.get('word').trim(),
+            hint: formData.get('hint').trim(),
+            keywords,
+          })
+          writingQuestionForm.reset()
+        },
+        'Đã lưu đề viết.',
+      )
+    })
+  }
+
   document.querySelectorAll('[data-delete-question-answer]').forEach((button) => {
     button.addEventListener('click', () => {
       const id = Number(button.dataset.deleteQuestionAnswer)
@@ -1331,6 +1448,59 @@ function attachSourceEvents() {
           })
         },
         'Đã cập nhật câu hỏi/câu trả lời.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-delete-writing-question]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.deleteWritingQuestion)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion('writing', id)
+        },
+        'Đã xóa đề viết.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-edit-writing-question]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.editWritingQuestion)
+      if (!id) return
+
+      const item = (state.database.questions.writing || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      const word = window.prompt('Từ cần định nghĩa', item.word)
+      if (word === null) return
+      const hint = window.prompt('Gợi ý', item.hint)
+      if (hint === null) return
+      const keywordsText = window.prompt(
+        'Đáp án mẫu theo dòng (mỗi dòng 1 đáp án)',
+        (item.keywords || []).join('\n'),
+      )
+      if (keywordsText === null) return
+
+      const keywords = parseWritingSampleLines(keywordsText)
+      if (!keywords.length) {
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho đề viết.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      withRefresh(
+        async () => {
+          await updateQuestion('writing', id, {
+            word: word.trim(),
+            hint: hint.trim(),
+            keywords,
+          })
+        },
+        'Đã cập nhật đề viết.',
       )
     })
   })

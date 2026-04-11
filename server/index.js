@@ -602,26 +602,56 @@ app.post('/api/vocabulary/:id/delete', async (req, res, next) => {
 
 app.post('/api/questions', async (req, res, next) => {
   try {
-    const questionText = String(req.body.question || '').trim()
-    const answerText = String(req.body.answer || '').trim()
-    const question = questionText
-    const answer = answerText
-    if (!question || !answer) {
-      return res.status(400).json({ message: 'Dữ liệu câu hỏi trắc nghiệm không hợp lệ' })
+    const type = toQuestionType(req.body.type || 'mcq')
+
+    if (type === 'mcq') {
+      const question = String(req.body.question || '').trim()
+      const answer = String(req.body.answer || '').trim()
+      if (!question || !answer) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi trắc nghiệm không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('mcq_questions').insert([
+        {
+          question,
+          option_a: '',
+          option_b: '',
+          option_c: '',
+          option_d: '',
+          mode: 'general',
+          answer,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
     }
 
-    const { error } = await supabase.from('mcq_questions').insert([
-      {
-        question,
-        option_a: '',
-        option_b: '',
-        option_c: '',
-        option_d: '',
-        mode: 'general',
-        answer,
-      },
-    ])
-    assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
+    if (type === 'writing') {
+      const word = String(req.body.word || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const keywords = Array.isArray(req.body.keywords)
+        ? req.body.keywords
+          .map((line) => String(line || '').trim())
+          .filter(Boolean)
+        : []
+
+      if (!word || !hint || !keywords.length) {
+        return res.status(400).json({ message: 'Dữ liệu bài viết không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('writing_questions').insert([
+        {
+          word,
+          hint,
+          keywords,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm đề viết')
+    }
+
+    if (!type) {
+      return res.status(400).json({ message: 'Loại câu hỏi không hợp lệ' })
+    }
+
     clearDatabaseResponseCache()
 
     return res.status(201).json({ ok: true })
