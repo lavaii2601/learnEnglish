@@ -46,6 +46,29 @@ const supabase = supabaseUrl && supabaseKey
   : null
 
 let initPromise
+const DATABASE_RESPONSE_CACHE_TTL_MS = 15_000
+const databaseResponseCache = new Map()
+
+function getDatabaseResponseCache(cacheKey) {
+  const cached = databaseResponseCache.get(cacheKey)
+  if (!cached) return null
+  if (Date.now() - cached.timestamp > DATABASE_RESPONSE_CACHE_TTL_MS) {
+    databaseResponseCache.delete(cacheKey)
+    return null
+  }
+  return cached.payload
+}
+
+function setDatabaseResponseCache(cacheKey, payload) {
+  databaseResponseCache.set(cacheKey, {
+    timestamp: Date.now(),
+    payload,
+  })
+}
+
+function clearDatabaseResponseCache() {
+  databaseResponseCache.clear()
+}
 
 function assertSupabaseConfigured() {
   if (supabase) return
@@ -362,17 +385,26 @@ async function initDatabase() {
   assertSupabaseConfigured()
   if (shouldSeedSampleData) {
     await seedIfEmpty()
+    clearDatabaseResponseCache()
   }
 }
 
 async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
   const mcqSourceMode = toMcqExerciseSourceMode(mcqSourceModeInput)
 
-  const vocabularyRows = await fetchVocabularyRows()
-  const mcqRows = await fetchMcqRows()
-  const matchingRows = await fetchMatchingRows()
-  const fillRows = await fetchFillRows()
-  const writingRows = await fetchWritingRows()
+  const [
+    vocabularyRows,
+    mcqRows,
+    matchingRows,
+    fillRows,
+    writingRows,
+  ] = await Promise.all([
+    fetchVocabularyRows(),
+    fetchMcqRows(),
+    fetchMatchingRows(),
+    fetchFillRows(),
+    fetchWritingRows(),
+  ])
 
   const vocabularyDefinitions = vocabularyRows
     .map((row) => String(row.definition || '').trim())
@@ -467,11 +499,25 @@ app.get('/api/health', (_, res) => {
 
 app.get('/api/database', async (req, res, next) => {
   try {
-    const payload = await buildDatabasePayload(req.query.mcqMode)
+    const mcqMode = toMcqExerciseSourceMode(req.query.mcqMode)
     const wantsFresh = String(req.query.fresh || '') === '1'
+
+    if (!wantsFresh) {
+      const cachedPayload = getDatabaseResponseCache(mcqMode)
+      if (cachedPayload) {
+        res.set('x-cache-status', 'HIT')
+        res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120')
+        return res.json(cachedPayload)
+      }
+    }
+
+    const payload = await buildDatabasePayload(mcqMode)
+
     if (wantsFresh) {
       res.set('Cache-Control', 'no-store')
     } else {
+      setDatabaseResponseCache(mcqMode, payload)
+      res.set('x-cache-status', 'MISS')
       res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120')
     }
     res.json(payload)
@@ -492,6 +538,7 @@ app.post('/api/vocabulary', async (req, res, next) => {
 
     const { error } = await supabase.from('vocabulary').insert([{ word, definition, example }])
     assertNoSupabaseError(error, 'Không thể thêm từ vựng')
+    clearDatabaseResponseCache()
 
     return res.status(201).json({ ok: true })
   } catch (error) {
@@ -515,6 +562,7 @@ app.put('/api/vocabulary/:id', async (req, res, next) => {
       .update({ word, definition, example })
       .eq('id', id)
     assertNoSupabaseError(error, 'Không thể cập nhật từ vựng')
+    clearDatabaseResponseCache()
 
     return res.json({ ok: true })
   } catch (error) {
@@ -529,6 +577,7 @@ app.delete('/api/vocabulary/:id', async (req, res, next) => {
 
     const { error } = await supabase.from('vocabulary').delete().eq('id', id)
     assertNoSupabaseError(error, 'Không thể xóa từ vựng')
+    clearDatabaseResponseCache()
 
     return res.json({ ok: true })
   } catch (error) {
@@ -543,6 +592,7 @@ app.post('/api/vocabulary/:id/delete', async (req, res, next) => {
 
     const { error } = await supabase.from('vocabulary').delete().eq('id', id)
     assertNoSupabaseError(error, 'Không thể xóa từ vựng')
+    clearDatabaseResponseCache()
 
     return res.json({ ok: true })
   } catch (error) {
@@ -572,6 +622,7 @@ app.post('/api/questions', async (req, res, next) => {
       },
     ])
     assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
+    clearDatabaseResponseCache()
 
     return res.status(201).json({ ok: true })
   } catch (error) {
@@ -616,6 +667,7 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
         })
         .eq('id', id)
       assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi trắc nghiệm')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'matching') {
@@ -629,6 +681,7 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
         .update({ word, meaning })
         .eq('id', id)
       assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi nối từ')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'fillBlank') {
@@ -642,6 +695,7 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
         .update({ sentence, answer })
         .eq('id', id)
       assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi điền chỗ trống')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'writing') {
@@ -656,6 +710,7 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
         .update({ word, hint, keywords })
         .eq('id', id)
       assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi viết')
+      clearDatabaseResponseCache()
     }
 
     return res.json({ ok: true })
@@ -674,21 +729,25 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
     if (type === 'mcq') {
       const { error } = await supabase.from('mcq_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi trắc nghiệm')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'matching') {
       const { error } = await supabase.from('matching_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi nối từ')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'fillBlank') {
       const { error } = await supabase.from('fill_blank_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi điền chỗ trống')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'writing') {
       const { error } = await supabase.from('writing_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
+      clearDatabaseResponseCache()
     }
 
     return res.json({ ok: true })
@@ -707,21 +766,25 @@ app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
     if (type === 'mcq') {
       const { error } = await supabase.from('mcq_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi trắc nghiệm')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'matching') {
       const { error } = await supabase.from('matching_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi nối từ')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'fillBlank') {
       const { error } = await supabase.from('fill_blank_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi điền chỗ trống')
+      clearDatabaseResponseCache()
     }
 
     if (type === 'writing') {
       const { error } = await supabase.from('writing_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
+      clearDatabaseResponseCache()
     }
 
     return res.json({ ok: true })
