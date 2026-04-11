@@ -627,6 +627,7 @@ function renderLayout(content) {
     state.database.questions.fillBlank.length +
     state.database.questions.writing.length +
     (state.database.questions.listing || []).length
+  const listingCount = (state.database.questions.listing || []).length
 
   const quickBoardMarkup = `
     <header class="slide-board-head">
@@ -639,6 +640,7 @@ function renderLayout(content) {
       <article><span>Từ vựng</span><strong>${vocabularyCount}</strong></article>
       <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
       <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
+      <article><span>Câu hỏi liệt kê</span><strong>${listingCount}</strong></article>
     </div>
   `
 
@@ -843,7 +845,7 @@ function renderHome() {
         <article><strong>${matchingCount}</strong><span>Cặp nối từ</span></article>
         <article><strong>${blankCount}</strong><span>Câu điền trống</span></article>
         <article><strong>${writingCount}</strong><span>Đề viết</span></article>
-        <article><strong>${listingCount}</strong><span>Bài liệt kê</span></article>
+        <article><strong>${listingCount}</strong><span>Câu hỏi liệt kê</span></article>
       </div>
     </section>
   `
