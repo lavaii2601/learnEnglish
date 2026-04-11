@@ -13,7 +13,7 @@ async function request(path, options = {}) {
   })
 
   if (!response.ok) {
-    let message = 'Yêu cầu thất bại'
+    let message = `Yêu cầu thất bại (HTTP ${response.status})`
     try {
       const payload = await response.json()
       message = payload.message || message

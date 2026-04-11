@@ -11,16 +11,18 @@ app.use(express.json())
 
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
-
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY trong biến môi trường.')
-}
-
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false },
-})
+const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey, {
+    auth: { persistSession: false },
+  })
+  : null
 
 let initPromise
+
+function assertSupabaseConfigured() {
+  if (supabase) return
+  throw new Error('Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY trong biến môi trường.')
+}
 
 function toQuestionType(type) {
   if (type === 'mcq') return 'mcq'
@@ -329,6 +331,7 @@ async function seedIfEmpty() {
 }
 
 async function initDatabase() {
+  assertSupabaseConfigured()
   await seedIfEmpty()
 }
 
