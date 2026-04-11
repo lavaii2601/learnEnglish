@@ -465,6 +465,7 @@ app.get('/api/health', (_, res) => {
 app.get('/api/database', async (req, res, next) => {
   try {
     const payload = await buildDatabasePayload(req.query.mcqMode)
+    res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120')
     res.json(payload)
   } catch (error) {
     next(error)

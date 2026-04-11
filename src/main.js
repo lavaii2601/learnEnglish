@@ -11,6 +11,7 @@ import {
 
 const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
+const DATABASE_CACHE_TTL_MS = 30_000
 
 function loadSidebarOpenState() {
   const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY)
@@ -46,6 +47,38 @@ const state = {
   mcqNextPromptOpen: false,
   mcqReviewOpen: false,
   mcqWrongQuestions: [],
+  databaseCache: {},
+}
+
+function cloneDatabasePayload(payload) {
+  return JSON.parse(JSON.stringify(payload))
+}
+
+function getDatabaseCacheKey() {
+  if (state.route === '/exercise/mcq') {
+    return `mcq:${state.mcqSourceMode}`
+  }
+  return 'default'
+}
+
+function getCachedDatabaseEntry() {
+  const key = getDatabaseCacheKey()
+  const cached = state.databaseCache[key]
+  if (!cached) return null
+  if (Date.now() - cached.timestamp > DATABASE_CACHE_TTL_MS) return null
+  return cached
+}
+
+function saveDatabaseCache(payload) {
+  const key = getDatabaseCacheKey()
+  state.databaseCache[key] = {
+    timestamp: Date.now(),
+    data: cloneDatabasePayload(payload),
+  }
+}
+
+function clearDatabaseCache() {
+  state.databaseCache = {}
 }
 
 function normalizeText(text) {
@@ -394,12 +427,26 @@ function renderLandingPage() {
   `
 }
 
-async function refreshDatabase() {
-  if (state.route === '/exercise/mcq') {
-    state.database = await fetchDatabase({ mcqMode: state.mcqSourceMode })
-    return
+async function refreshDatabase(options = {}) {
+  const { force = false } = options
+
+  if (!force) {
+    const cached = getCachedDatabaseEntry()
+    if (cached) {
+      state.database = cloneDatabasePayload(cached.data)
+      return
+    }
   }
-  state.database = await fetchDatabase()
+
+  let payload
+  if (state.route === '/exercise/mcq') {
+    payload = await fetchDatabase({ mcqMode: state.mcqSourceMode })
+  } else {
+    payload = await fetchDatabase()
+  }
+
+  state.database = payload
+  saveDatabaseCache(payload)
 }
 
 async function loadDataForCurrentRoute() {
@@ -410,9 +457,10 @@ async function loadDataForCurrentRoute() {
     return
   }
 
-  state.loading = true
+  const hasFreshCache = Boolean(getCachedDatabaseEntry())
+  state.loading = !hasFreshCache
   state.serverError = ''
-  render()
+  if (state.loading) render()
 
   try {
     await refreshDatabase()
@@ -428,7 +476,8 @@ async function loadDataForCurrentRoute() {
 async function withRefresh(action, successMessage) {
   try {
     await action()
-    await refreshDatabase()
+    clearDatabaseCache()
+    await refreshDatabase({ force: true })
     resetExerciseState()
     state.sourceMessage = successMessage
     state.sourceMessageType = 'ok'
