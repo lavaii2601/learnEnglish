@@ -2,10 +2,8 @@ import './style.css'
 import {
   createQuestion,
   createVocabulary,
-  deleteQuestion,
   deleteVocabulary,
   fetchDatabase,
-  updateQuestion,
   updateVocabulary,
 } from './api'
 
@@ -30,7 +28,6 @@ const state = {
   matchAnswers: {},
   blankAnswers: [],
   writingAnswers: [],
-  manageQuestionType: 'mcq',
   slideBoardOpen: false,
   sidebarOpen: loadSidebarOpenState(),
   resultNotice: null,
@@ -883,24 +880,11 @@ function renderSourceQuestion() {
     <section class="page-card">
       <h2>Nhiệm vụ: Thêm câu hỏi + câu trả lời</h2>
       <form id="question-form" class="stack-form">
-        <p class="muted">Nhập dữ liệu nguồn, hệ thống sẽ tự phân loại bài tập phù hợp.</p>
+        <p class="muted">Nhập câu hỏi và đáp án để lưu vào cơ sở dữ liệu câu hỏi.</p>
         <label>Câu hỏi<input name="question" required placeholder="Ví dụ: Nghĩa của từ resilient là gì?" /></label>
         <label>Đáp án đúng<input name="answer" required placeholder="Có khả năng phục hồi nhanh sau khó khăn" /></label>
         <button type="submit">Lưu câu hỏi vào cơ sở dữ liệu</button>
       </form>
-
-      <h3>Quản lý câu hỏi (sửa/xóa)</h3>
-      <label>
-        Chọn loại để quản lý
-        <select id="manage-question-type">
-          <option value="mcq" ${state.manageQuestionType === 'mcq' ? 'selected' : ''}>Trắc nghiệm</option>
-          <option value="matching" ${state.manageQuestionType === 'matching' ? 'selected' : ''}>Nối từ</option>
-          <option value="fillBlank" ${state.manageQuestionType === 'fillBlank' ? 'selected' : ''}>Điền chỗ trống</option>
-          <option value="writing" ${state.manageQuestionType === 'writing' ? 'selected' : ''}>Viết</option>
-        </select>
-      </label>
-
-      <div class="manage-list">${renderManagedQuestions()}</div>
       ${renderSourceMessage()}
     </section>
   `
@@ -1114,6 +1098,8 @@ function attachExerciseEvents() {
 
 function parseQuestionPayload(formData) {
   return {
+    type: 'mcq',
+    mode: 'general',
     question: formData.get('question').trim(),
     answer: formData.get('answer').trim(),
   }
@@ -1191,125 +1177,10 @@ function attachSourceEvents() {
           await createQuestion(payload)
           questionForm.reset()
         },
-        'Đã thêm câu hỏi vào cơ sở dữ liệu SQLite.',
+        'Đã lưu câu hỏi vào cơ sở dữ liệu.',
       )
     })
   }
-
-  const manageQuestionType = document.querySelector('#manage-question-type')
-  if (manageQuestionType) {
-    manageQuestionType.addEventListener('change', () => {
-      state.manageQuestionType = manageQuestionType.value
-      render()
-    })
-  }
-
-  document.querySelectorAll('[data-delete-question]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const [type, idRaw] = String(button.dataset.deleteQuestion || '').split(':')
-      const id = Number(idRaw)
-      if (!type || !id) return
-
-      withRefresh(
-        async () => {
-          await deleteQuestion(type, id)
-        },
-        'Đã xóa câu hỏi.',
-      )
-    })
-  })
-
-  document.querySelectorAll('[data-edit-question]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const [type, idRaw] = String(button.dataset.editQuestion || '').split(':')
-      const id = Number(idRaw)
-      if (!type || !id) return
-
-      const list = state.database.questions[type]
-      const item = list.find((entry) => entry.id === id)
-      if (!item) return
-
-      if (type === 'mcq') {
-        const currentMode = item.mode === 'vocabulary_definition' ? 'vocabulary_definition' : 'general'
-        const modeInput = window.prompt(
-          'Kiểu trắc nghiệm (general hoặc vocabulary_definition)',
-          currentMode,
-        )
-        if (modeInput === null) return
-        const question = window.prompt('Câu hỏi', item.question)
-        if (question === null) return
-        const answer = window.prompt('Đáp án đúng', item.answer)
-        if (answer === null) return
-
-        withRefresh(
-          async () => {
-            await updateQuestion('mcq', id, {
-              mode: modeInput.trim(),
-              question: question.trim(),
-              answer: answer.trim(),
-            })
-          },
-          'Đã cập nhật câu hỏi.',
-        )
-        return
-      }
-
-      if (type === 'matching') {
-        const word = window.prompt('Từ', item.word)
-        if (word === null) return
-        const meaning = window.prompt('Nghĩa', item.meaning)
-        if (meaning === null) return
-        withRefresh(
-          async () => {
-            await updateQuestion('matching', id, {
-              word: word.trim(),
-              meaning: meaning.trim(),
-            })
-          },
-          'Đã cập nhật câu hỏi.',
-        )
-        return
-      }
-
-      if (type === 'fillBlank') {
-        const sentence = window.prompt('Câu (phải có ___)', item.sentence)
-        if (sentence === null) return
-        const answer = window.prompt('Đáp án đúng', item.answer)
-        if (answer === null) return
-        withRefresh(
-          async () => {
-            await updateQuestion('fillBlank', id, {
-              sentence: sentence.trim(),
-              answer: answer.trim(),
-            })
-          },
-          'Đã cập nhật câu hỏi.',
-        )
-        return
-      }
-
-      const word = window.prompt('Từ', item.word)
-      if (word === null) return
-      const hint = window.prompt('Gợi ý', item.hint)
-      if (hint === null) return
-      const keywords = window.prompt('Từ khóa (phân tách bằng dấu phẩy)', item.keywords.join(', '))
-      if (keywords === null) return
-
-      withRefresh(
-        async () => {
-          await updateQuestion('writing', id, {
-            word: word.trim(),
-            hint: hint.trim(),
-            keywords: keywords
-              .split(',')
-              .map((entry) => entry.trim().toLowerCase())
-              .filter(Boolean),
-          })
-        },
-        'Đã cập nhật câu hỏi.',
-      )
-    })
-  })
 }
 
 function attachEvents() {

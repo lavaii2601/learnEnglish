@@ -549,86 +549,24 @@ app.post('/api/questions', async (req, res, next) => {
   try {
     const questionText = String(req.body.question || '').trim()
     const answerText = String(req.body.answer || '').trim()
-    const explicitType = toQuestionType(req.body.type)
-    const type = explicitType || detectQuestionType(questionText, answerText)
-    if (!type) return res.status(400).json({ message: 'Loại câu hỏi không hợp lệ' })
-
-    if (type === 'mcq') {
-      let mode = toMcqMode(req.body.mode)
-      const question = questionText
-      const answer = answerText
-      if (!question || !answer) {
-        return res.status(400).json({ message: 'Dữ liệu câu hỏi trắc nghiệm không hợp lệ' })
-      }
-
-      if (!req.body.mode) {
-        const vocabularyHit = await isVocabularyDefinition(answer)
-        if (vocabularyHit) {
-          mode = 'vocabulary_definition'
-        }
-      }
-
-      if (mode === 'vocabulary_definition') {
-        const vocabHit = await isVocabularyDefinition(answer)
-        if (!vocabHit) {
-          return res.status(400).json({
-            message: 'Với loại từ vựng-định nghĩa, đáp án đúng phải là một định nghĩa đã có trong kho từ vựng.',
-          })
-        }
-      }
-
-      const { error } = await supabase.from('mcq_questions').insert([
-        {
-          question,
-          option_a: '',
-          option_b: '',
-          option_c: '',
-          option_d: '',
-          mode,
-          answer,
-        },
-      ])
-      assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
+    const question = questionText
+    const answer = answerText
+    if (!question || !answer) {
+      return res.status(400).json({ message: 'Dữ liệu câu hỏi trắc nghiệm không hợp lệ' })
     }
 
-    if (type === 'matching') {
-      const word = String(req.body.word || '').trim() || extractWordFromQuestion(questionText)
-      const meaning = String(req.body.meaning || '').trim() || answerText
-      if (!word || !meaning) {
-        return res.status(400).json({ message: 'Dữ liệu bài nối từ không hợp lệ' })
-      }
-      const { error } = await supabase.from('matching_questions').insert([{ word, meaning }])
-      assertNoSupabaseError(error, 'Không thể thêm câu hỏi nối từ')
-    }
-
-    if (type === 'fillBlank') {
-      const sentence = String(req.body.sentence || '').trim() || questionText
-      const answer = answerText
-      if (!sentence || !answer) {
-        return res.status(400).json({ message: 'Dữ liệu bài điền chỗ trống không hợp lệ' })
-      }
-      const { error } = await supabase.from('fill_blank_questions').insert([{ sentence, answer }])
-      assertNoSupabaseError(error, 'Không thể thêm câu hỏi điền chỗ trống')
-    }
-
-    if (type === 'writing') {
-      const word = String(req.body.word || '').trim() || extractWordFromQuestion(questionText) || 'Từ mới'
-      const hint = String(req.body.hint || '').trim() || questionText
-      const keywords = Array.isArray(req.body.keywords) && req.body.keywords.length
-        ? req.body.keywords
-        : toKeywords(answerText)
-      if (!word || !hint) {
-        return res.status(400).json({ message: 'Dữ liệu bài viết không hợp lệ' })
-      }
-      const { error } = await supabase.from('writing_questions').insert([
-        {
-          word,
-          hint,
-          keywords,
-        },
-      ])
-      assertNoSupabaseError(error, 'Không thể thêm câu hỏi viết')
-    }
+    const { error } = await supabase.from('mcq_questions').insert([
+      {
+        question,
+        option_a: '',
+        option_b: '',
+        option_c: '',
+        option_d: '',
+        mode: 'general',
+        answer,
+      },
+    ])
+    assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
 
     return res.status(201).json({ ok: true })
   } catch (error) {
