@@ -38,6 +38,7 @@ app.use((req, _, next) => {
 
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+const shouldSeedSampleData = process.env.ENABLE_SAMPLE_SEED === 'true'
 const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey, {
     auth: { persistSession: false },
@@ -359,7 +360,9 @@ async function seedIfEmpty() {
 
 async function initDatabase() {
   assertSupabaseConfigured()
-  await seedIfEmpty()
+  if (shouldSeedSampleData) {
+    await seedIfEmpty()
+  }
 }
 
 async function buildDatabasePayload(mcqSourceModeInput = 'mix') {

@@ -12,7 +12,7 @@
 - Điền vào chỗ trống
 - Viết định nghĩa (chấm theo từ khóa)
 
-Tất cả bài tập đều truy xuất đáp án đúng từ cơ sở dữ liệu SQLite thông qua backend API.
+Tất cả bài tập đều truy xuất đáp án đúng từ Supabase thông qua backend API.
 
 ## Thêm nguồn (2 nhiệm vụ riêng)
 
@@ -41,7 +41,7 @@ Cấu trúc gồm:
 - Vite
 - Vanilla JavaScript
 - Node.js + Express
-- SQLite
+- Supabase Postgres
 - CSS responsive cho desktop/mobile
 
 ## Chạy dự án
@@ -57,6 +57,8 @@ SUPABASE_URL=your_supabase_project_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
 # Hoặc dùng key này cho backend (khuyến nghị khi deploy)
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+# Bật true nếu muốn tự seed dữ liệu mẫu khi backend khởi động
+ENABLE_SAMPLE_SEED=false
 ```
 
 ### Cách nhanh (không cần gõ nhiều lệnh)
