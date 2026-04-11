@@ -1,5 +1,5 @@
 :root {
-  --bg: #f3f5f8;
+  --bg: #e7ebf0;
   --paper: #ffffff;
   --paper-alt: #f7f8fa;
   --ink: #1f2937;
@@ -27,7 +27,7 @@ body {
   font-family: 'Times New Roman', Times, serif;
   color: var(--ink);
   background:
-    linear-gradient(180deg, #f7f9fc 0%, #f3f5f8 220px, #f3f5f8 100%);
+    linear-gradient(180deg, #edf1f5 0%, #e3e8ee 220px, #e3e8ee 100%);
   line-height: 1.45;
 }
 
@@ -100,8 +100,8 @@ body {
 }
 
 .app-shell {
-  background: #eceff3;
-  border: 1px solid #d1d7e0;
+  background: #dbe2ea;
+  border: 1px solid #b8c3d0;
   border-radius: 24px;
   padding: 14px;
 }
@@ -111,8 +111,8 @@ body {
 }
 
 .sidebar {
-  background: linear-gradient(180deg, #eef2f6 0%, #e5eaf0 100%);
-  border: 1px solid #bcc6d3;
+  background: linear-gradient(180deg, #f6f8fb 0%, #eef2f6 100%);
+  border: 1px solid #aebaca;
   border-radius: 18px;
   padding: 18px;
   display: grid;
@@ -161,7 +161,7 @@ body {
 .nav-btn {
   width: 100%;
   text-align: left;
-  border: 1px solid #bdc7d3;
+  border: 1px solid #aebaca;
   border-radius: 12px;
   background: #ffffff;
   color: var(--ink);
@@ -174,14 +174,14 @@ body {
 
 .nav-btn:hover {
   transform: none;
-  border-color: #8d9bae;
+  border-color: #6d7f95;
   box-shadow: 0 0 0 3px rgba(63, 95, 123, 0.1);
   background: #eef2f6;
 }
 
 .nav-btn.active {
-  border-color: #6e7d92;
-  background: linear-gradient(180deg, #dde4ec 0%, #d3dbe4 100%);
+  border-color: #4e637b;
+  background: linear-gradient(180deg, #d3dde8 0%, #c9d4e0 100%);
   color: var(--brand-deep);
   font-weight: 700;
   box-shadow: inset 0 0 0 1px rgba(47, 71, 93, 0.16);
@@ -281,10 +281,10 @@ body {
 
 .content {
   background: var(--paper);
-  border: 1px solid #c7d0dc;
+  border: 1px solid #aebaca;
   border-radius: 18px;
   padding: 22px;
-  box-shadow: 0 8px 18px rgba(31, 41, 55, 0.08);
+  box-shadow: 0 10px 24px rgba(31, 41, 55, 0.12);
   transition: transform var(--motion-mid) ease;
 }
 
