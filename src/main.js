@@ -32,7 +32,10 @@ const state = {
   blankAnswers: [],
   writingAnswers: [],
   listingAnswers: [],
-  listingChecked: false,
+  listingQuestionCount: 5,
+  listingSessionIndexes: [],
+  listingCurrentIndex: 0,
+  listingCheckedMap: [],
   slideBoardOpen: false,
   sidebarOpen: loadSidebarOpenState(),
   resultNotice: null,
@@ -52,8 +55,12 @@ const state = {
   mcqReviewOpen: false,
   mcqWrongQuestions: [],
   databaseCache: {},
-  listingPreparedCacheKey: '',
+  listingPreparedDirty: true,
   listingPreparedCacheItems: [],
+  writingScoreDirty: true,
+  writingScoreCache: [],
+  listingScoreDirty: true,
+  listingScoreCache: [],
 }
 
 function cloneDatabasePayload(payload) {
@@ -126,14 +133,7 @@ function tokenizeWords(value) {
 
 function getListingPreparedItems() {
   const list = state.database.questions.listing || []
-  const cacheKey = JSON.stringify(
-    list.map((item) => ({
-      id: item.id,
-      answers: Array.isArray(item.answers) ? item.answers : [],
-    })),
-  )
-
-  if (cacheKey === state.listingPreparedCacheKey) {
+  if (!state.listingPreparedDirty) {
     return state.listingPreparedCacheItems
   }
 
@@ -153,8 +153,8 @@ function getListingPreparedItems() {
     }
   })
 
-  state.listingPreparedCacheKey = cacheKey
   state.listingPreparedCacheItems = preparedItems
+  state.listingPreparedDirty = false
   return preparedItems
 }
 
@@ -274,6 +274,27 @@ function getShuffledItems(items) {
   return list
 }
 
+function buildListingSessionIndexes(totalQuestions) {
+  const cappedTotal = Math.max(0, Number(totalQuestions) || 0)
+  if (!cappedTotal) return []
+
+  const maxAllowed = Math.min(5, cappedTotal)
+  const selectedCount = Math.min(maxAllowed, Math.max(1, state.listingQuestionCount || 1))
+  const allIndexes = Array.from({ length: cappedTotal }, (_, index) => index)
+  return getShuffledItems(allIndexes).slice(0, selectedCount)
+}
+
+function resetListingSession(totalQuestions) {
+  state.listingSessionIndexes = buildListingSessionIndexes(totalQuestions)
+  state.listingCurrentIndex = state.listingSessionIndexes[0] || 0
+  state.listingCheckedMap = Array(totalQuestions).fill(false)
+}
+
+function invalidateScoreCaches() {
+  state.writingScoreDirty = true
+  state.listingScoreDirty = true
+}
+
 function pickMixedQuizItems(pool, maxCount) {
   if (!Array.isArray(pool) || maxCount <= 0) return []
 
@@ -340,7 +361,9 @@ function resetExerciseState() {
   state.blankAnswers = Array(fillBlank.length).fill('')
   state.writingAnswers = Array(writing.length).fill('')
   state.listingAnswers = Array(listing.length).fill('')
-  state.listingChecked = false
+  resetListingSession(listing.length)
+  state.listingPreparedDirty = true
+  invalidateScoreCaches()
 }
 
 function scoreMcq() {
@@ -370,7 +393,9 @@ function scoreBlanks() {
 }
 
 function scoreWriting() {
-  return state.database.questions.writing.map((item, index) => {
+  if (!state.writingScoreDirty) return state.writingScoreCache
+
+  const scores = state.database.questions.writing.map((item, index) => {
     const expectedLines = (Array.isArray(item.keywords) ? item.keywords : [])
       .map((line) => normalizeListLine(line))
       .filter(Boolean)
@@ -405,6 +430,9 @@ function scoreWriting() {
       percent,
     }
   })
+  state.writingScoreCache = scores
+  state.writingScoreDirty = false
+  return state.writingScoreCache
 }
 
 function getWritingCorrectCount(scores = scoreWriting()) {
@@ -412,7 +440,9 @@ function getWritingCorrectCount(scores = scoreWriting()) {
 }
 
 function scoreListing() {
-  return getListingPreparedItems().map((item, index) => {
+  if (!state.listingScoreDirty) return state.listingScoreCache
+
+  const scores = getListingPreparedItems().map((item, index) => {
     const userLines = parseWritingSampleLines(state.listingAnswers[index] || '')
 
     const usedUserIndexes = new Set()
@@ -482,10 +512,17 @@ function scoreListing() {
       ideaDetails,
     }
   })
+  state.listingScoreCache = scores
+  state.listingScoreDirty = false
+  return state.listingScoreCache
 }
 
-function getListingCorrectCount(scores = scoreListing()) {
-  return scores.filter((item) => item.percent >= LISTING_MATCH_THRESHOLD * 100).length
+function getListingCorrectCount(scores = scoreListing(), indexes = state.listingSessionIndexes) {
+  const indexSet = new Set(indexes || [])
+  return scores
+    .filter((_, index) => indexSet.has(index))
+    .filter((item) => item.percent >= LISTING_MATCH_THRESHOLD * 100)
+    .length
 }
 
 function isMcqRoundComplete() {
@@ -554,10 +591,9 @@ function openResultNotice(type) {
 
   if (type === 'listing') {
     const listingScores = scoreListing()
-    correct = getListingCorrectCount(listingScores)
-    total = (state.database.questions.listing || []).length
+    correct = getListingCorrectCount(listingScores, state.listingSessionIndexes)
+    total = state.listingSessionIndexes.length
     title = 'Kết quả bài liệt kê'
-    state.listingChecked = true
   }
 
   state.resultNotice = {
@@ -1063,29 +1099,50 @@ function renderWritingPage() {
 function renderListingPage() {
   const items = state.database.questions.listing || []
   const scores = scoreListing()
-  const correctCount = getListingCorrectCount(scores)
+  const sessionIndexes = state.listingSessionIndexes || []
+  const correctCount = getListingCorrectCount(scores, sessionIndexes)
   const listingThresholdPercent = Math.round(LISTING_MATCH_THRESHOLD * 100)
+  const totalCount = sessionIndexes.length
+  const currentIndex = Math.max(0, Math.min(state.listingCurrentIndex, Math.max(totalCount - 1, 0)))
+  const activeQuestionIndex = sessionIndexes[currentIndex] ?? 0
+  const currentItem = items[activeQuestionIndex]
+  const currentScore = scores[activeQuestionIndex] || { percent: 0, hitCount: 0, total: 0, ideaDetails: [] }
+  const currentChecked = Boolean(state.listingCheckedMap[activeQuestionIndex])
+  const checkedCount = sessionIndexes.filter((index) => state.listingCheckedMap[index]).length
+  const allChecked = totalCount > 0 && checkedCount === totalCount
+  const maxSelectable = Math.min(5, Math.max(1, items.length || 1))
+  const currentSelectable = Math.min(maxSelectable, Math.max(1, state.listingQuestionCount || 1))
 
   return `
     <section class="page-card">
       <h2>Liệt kê ý</h2>
-      ${items
-        .map(
-          (item, index) => `
+      <article class="question-card compact">
+        <label>
+          Số lượng câu liệt kê (1-5)
+          <select data-listing-question-count>
+            ${Array.from({ length: maxSelectable }, (_, index) => index + 1)
+      .map((value) => `<option value="${value}" ${currentSelectable === value ? 'selected' : ''}>${value} câu</option>`)
+      .join('')}
+          </select>
+        </label>
+        <button type="button" class="small-btn" data-listing-reset-session>Random bộ câu mới</button>
+      </article>
+      ${currentItem
+      ? `
             <article class="question-card">
               <h3 class="question-title">
-                <span class="question-order">Câu hỏi liệt kê</span>
-                <span class="question-text">${escapeHtml(item.prompt)}</span>
+                <span class="question-order">Câu ngẫu nhiên (${checkedCount}/${totalCount} đã kiểm tra)</span>
+                <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
               </h3>
-              <p class="question-hint">${escapeHtml(item.hint || 'Liệt kê các ý theo từng dòng.')}</p>
+              <p class="question-hint">${escapeHtml(currentItem.hint || 'Liệt kê các ý theo từng dòng.')}</p>
               <p class="muted">Mỗi dòng là 1 ý. Không cần đúng thứ tự.</p>
-              <textarea data-listing-index="${index}" rows="6" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.listingAnswers[index] || '')}</textarea>
-              <p class="muted">Độ khớp theo dòng: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
-              ${state.listingChecked
+              <textarea data-listing-index="${activeQuestionIndex}" rows="6" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.listingAnswers[activeQuestionIndex] || '')}</textarea>
+              <p class="muted">Độ khớp theo dòng: <strong>${currentScore.percent}%</strong> (${currentScore.hitCount}/${currentScore.total})</p>
+              ${currentChecked
       ? `
                 <div class="listing-review-block">
                   <p class="muted"><strong>Đáp án đúng và đối chiếu chi tiết:</strong></p>
-                  ${(scores[index].ideaDetails || [])
+                  ${(currentScore.ideaDetails || [])
       .map((detail) => `
                       <article class="listing-review-item ${detail.isCorrect ? 'ok' : 'wrong'}">
                         <p><strong>Ý chuẩn:</strong> ${escapeHtml(detail.expected)}</p>
@@ -1102,11 +1159,18 @@ function renderListingPage() {
               `
       : ''}
             </article>
-          `,
-        )
-        .join('')}
-      <p class="score-line">Câu đạt yêu cầu (>= ${listingThresholdPercent}%): <strong>${correctCount}/${items.length}</strong></p>
-      <button type="button" class="action-btn" data-check-result="listing">Kiểm tra kết quả</button>
+            ${currentChecked
+      ? `
+              <div class="mcq-complete-actions">
+                ${!allChecked ? '<button type="button" class="action-btn" data-listing-next-question>Qua câu ngẫu nhiên tiếp theo</button>' : ''}
+                ${allChecked ? '<button type="button" class="small-btn" data-check-result="listing">Xem tổng kết</button>' : ''}
+              </div>
+            `
+      : '<button type="button" class="action-btn" data-listing-check-current>Kiểm tra câu hiện tại</button>'}
+          `
+      : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
+      <p class="score-line">Đã kiểm tra: <strong>${checkedCount}/${totalCount}</strong> câu</p>
+      <p class="score-line">Câu đạt yêu cầu (>= ${listingThresholdPercent}%): <strong>${correctCount}/${totalCount}</strong></p>
     </section>
   `
 }
@@ -1458,6 +1522,7 @@ function attachExerciseEvents() {
     textarea.addEventListener('input', (event) => {
       const target = event.target
       state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
+      state.writingScoreDirty = true
     })
 
     textarea.addEventListener('blur', (event) => {
@@ -1470,13 +1535,55 @@ function attachExerciseEvents() {
   document.querySelectorAll('textarea[data-listing-index]').forEach((textarea) => {
     textarea.addEventListener('input', (event) => {
       const target = event.target
-      state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
-      state.listingChecked = false
+      const index = Number(target.dataset.listingIndex)
+      state.listingAnswers[index] = target.value
+      state.listingCheckedMap[index] = false
+      state.listingScoreDirty = true
     })
 
     textarea.addEventListener('blur', (event) => {
       const target = event.target
       state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-listing-check-current]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
+      const index = activeIndex
+      state.listingCheckedMap[index] = true
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-listing-next-question]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const uncheckedIndexes = state.listingSessionIndexes
+        .filter((index) => !state.listingCheckedMap[index])
+
+      if (!uncheckedIndexes.length) return
+
+      const randomIndex = Math.floor(Math.random() * uncheckedIndexes.length)
+      const nextQuestionIndex = uncheckedIndexes[randomIndex]
+      state.listingCurrentIndex = state.listingSessionIndexes.findIndex((index) => index === nextQuestionIndex)
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-listing-question-count]').forEach((select) => {
+    select.addEventListener('change', (event) => {
+      const target = event.target
+      const nextValue = Number(target.value) || 1
+      state.listingQuestionCount = Math.min(5, Math.max(1, nextValue))
+      resetListingSession((state.database.questions.listing || []).length)
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-listing-reset-session]').forEach((button) => {
+    button.addEventListener('click', () => {
+      resetListingSession((state.database.questions.listing || []).length)
       render()
     })
   })
