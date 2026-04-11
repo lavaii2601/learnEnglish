@@ -1,17 +1,7 @@
 import cors from 'cors'
 import express from 'express'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import sqlite3 from 'sqlite3'
-import { open } from 'sqlite'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const rootDir = path.resolve(__dirname, '..')
-const dataDir = path.join(rootDir, 'data')
-const dbFile = path.join(dataDir, 'english_lab.db')
-const fillDbFile = path.join(dataDir, 'english_lab_fill_blank.db')
+import { pathToFileURL } from 'node:url'
+import { createClient } from '@supabase/supabase-js'
 
 const app = express()
 const PORT = Number(process.env.PORT || 3001)
@@ -19,7 +9,48 @@ const PORT = Number(process.env.PORT || 3001)
 app.use(cors())
 app.use(express.json())
 
-let db
+function normalizePathFromRequestUrl(rawUrl) {
+  const raw = String(rawUrl || '/').trim()
+  if (!raw) return '/'
+
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    try {
+      const parsed = new URL(raw)
+      return `${parsed.pathname || '/'}${parsed.search || ''}`
+    } catch {
+      return '/'
+    }
+  }
+
+  return raw
+}
+
+// Vercel can forward requests as /resource instead of /api/resource in some setups.
+app.use((req, _, next) => {
+  const currentUrl = normalizePathFromRequestUrl(req.url)
+  if (!currentUrl.startsWith('/api')) {
+    req.url = `/api${currentUrl.startsWith('/') ? '' : '/'}${currentUrl}`
+  } else {
+    req.url = currentUrl
+  }
+  next()
+})
+
+const supabaseUrl = process.env.SUPABASE_URL
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+const shouldSeedSampleData = process.env.ENABLE_SAMPLE_SEED === 'true'
+const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey, {
+    auth: { persistSession: false },
+  })
+  : null
+
+let initPromise
+
+function assertSupabaseConfigured() {
+  if (supabase) return
+  throw new Error('Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY trong biến môi trường.')
+}
 
 function toQuestionType(type) {
   if (type === 'mcq') return 'mcq'
@@ -55,11 +86,11 @@ function detectQuestionType(question, answer) {
   if (q.includes('___')) return 'fillBlank'
 
   if (
-    q.includes('định nghĩa') ||
-    q.includes('định nghia') ||
-    q.includes('define') ||
-    q.includes('viết') ||
-    q.includes('write')
+    q.includes('định nghĩa')
+    || q.includes('định nghia')
+    || q.includes('define')
+    || q.includes('viết')
+    || q.includes('write')
   ) {
     return 'writing'
   }
@@ -166,7 +197,6 @@ function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
     .slice(0, 3)
     .map((item) => item.answer)
 
-  // Keep four options even when data is still sparse.
   while (pickedDistractors.length < 3) {
     pickedDistractors.push(`Phương án nhiễu ${pickedDistractors.length + 1}`)
   }
@@ -174,226 +204,179 @@ function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
   return shuffleList([currentAnswer, ...pickedDistractors])
 }
 
-async function initDatabase() {
-  await fs.mkdir(dataDir, { recursive: true })
-  db = await open({
-    filename: dbFile,
-    driver: sqlite3.Database,
-  })
-
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS vocabulary (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      word TEXT NOT NULL,
-      definition TEXT NOT NULL,
-      example TEXT DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS mcq_questions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      question TEXT NOT NULL,
-      option_a TEXT NOT NULL,
-      option_b TEXT NOT NULL,
-      option_c TEXT NOT NULL,
-      option_d TEXT NOT NULL,
-      mode TEXT NOT NULL DEFAULT 'general',
-      answer TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS matching_questions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      word TEXT NOT NULL,
-      meaning TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS fill_blank_questions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sentence TEXT NOT NULL,
-      answer TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS writing_questions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      word TEXT NOT NULL,
-      hint TEXT NOT NULL,
-      keywords TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `)
-
-  await ensureMcqModeColumn()
-  await migrateLegacyFillBlankDatabase()
-
-  await seedIfEmpty()
+function assertNoSupabaseError(error, fallbackMessage) {
+  if (!error) return
+  throw new Error(error.message || fallbackMessage)
 }
 
-async function migrateLegacyFillBlankDatabase() {
-  try {
-    await fs.access(fillDbFile)
-  } catch {
-    return
-  }
-
-  const legacyDb = await open({
-    filename: fillDbFile,
-    driver: sqlite3.Database,
-  })
-
-  try {
-    const rows = await legacyDb.all(
-      'SELECT sentence, answer FROM fill_blank_questions ORDER BY id ASC',
-    )
-
-    for (const row of rows) {
-      const sentence = String(row.sentence || '').trim()
-      const answer = String(row.answer || '').trim()
-      if (!sentence || !answer) continue
-
-      const exists = await db.get(
-        `SELECT id FROM fill_blank_questions
-         WHERE LOWER(TRIM(sentence)) = LOWER(TRIM(?))
-           AND LOWER(TRIM(answer)) = LOWER(TRIM(?))
-         LIMIT 1`,
-        sentence,
-        answer,
-      )
-
-      if (!exists) {
-        await db.run(
-          'INSERT INTO fill_blank_questions (sentence, answer) VALUES (?, ?)',
-          sentence,
-          answer,
-        )
-      }
-    }
-  } finally {
-    await legacyDb.close()
-  }
+async function fetchVocabularyRows() {
+  const { data, error } = await supabase
+    .from('vocabulary')
+    .select('id, word, definition, example')
+    .order('id', { ascending: false })
+  assertNoSupabaseError(error, 'Không thể tải danh sách từ vựng')
+  return data || []
 }
 
-async function ensureMcqModeColumn() {
-  const columns = await db.all('PRAGMA table_info(mcq_questions)')
-  const hasMode = columns.some((column) => column.name === 'mode')
-  if (!hasMode) {
-    await db.exec("ALTER TABLE mcq_questions ADD COLUMN mode TEXT NOT NULL DEFAULT 'general'")
-  }
+async function fetchMcqRows() {
+  const { data, error } = await supabase
+    .from('mcq_questions')
+    .select('id, question, option_a, option_b, option_c, option_d, mode, answer')
+    .order('id', { ascending: false })
+  assertNoSupabaseError(error, 'Không thể tải câu hỏi trắc nghiệm')
+  return data || []
+}
+
+async function fetchMatchingRows() {
+  const { data, error } = await supabase
+    .from('matching_questions')
+    .select('id, word, meaning')
+    .order('id', { ascending: false })
+  assertNoSupabaseError(error, 'Không thể tải câu hỏi nối từ')
+  return data || []
+}
+
+async function fetchFillRows() {
+  const { data, error } = await supabase
+    .from('fill_blank_questions')
+    .select('id, sentence, answer')
+    .order('id', { ascending: false })
+  assertNoSupabaseError(error, 'Không thể tải câu hỏi điền chỗ trống')
+  return data || []
+}
+
+async function fetchWritingRows() {
+  const { data, error } = await supabase
+    .from('writing_questions')
+    .select('id, word, hint, keywords')
+    .order('id', { ascending: false })
+  assertNoSupabaseError(error, 'Không thể tải câu hỏi viết')
+  return data || []
+}
+
+async function vocabularyCount() {
+  const { count, error } = await supabase
+    .from('vocabulary')
+    .select('id', { count: 'exact', head: true })
+  assertNoSupabaseError(error, 'Không thể đếm từ vựng')
+  return count || 0
+}
+
+async function fillBlankCount() {
+  const { count, error } = await supabase
+    .from('fill_blank_questions')
+    .select('id', { count: 'exact', head: true })
+  assertNoSupabaseError(error, 'Không thể đếm câu điền chỗ trống')
+  return count || 0
+}
+
+async function isVocabularyDefinition(definition) {
+  const normalized = normalizeForCompare(definition)
+  if (!normalized) return false
+
+  const rows = await fetchVocabularyRows()
+  return rows.some((row) => normalizeForCompare(row.definition) === normalized)
 }
 
 async function seedIfEmpty() {
-  const vocabCount = await db.get('SELECT COUNT(*) AS total FROM vocabulary')
-  const fillCount = await db.get('SELECT COUNT(*) AS total FROM fill_blank_questions')
+  const vocabTotal = await vocabularyCount()
+  const fillTotal = await fillBlankCount()
 
-  if (vocabCount.total === 0) {
-    await db.run(
-      'INSERT INTO vocabulary (word, definition, example) VALUES (?, ?, ?)',
-      'resilient',
-      'Có khả năng phục hồi nhanh sau tình huống khó khăn.',
-      'Một học sinh kiên cường vẫn tiếp tục học sau khi mắc lỗi.',
-    )
-    await db.run(
-      'INSERT INTO vocabulary (word, definition, example) VALUES (?, ?, ?)',
-      'innovative',
-      'Sử dụng ý tưởng mới và sáng tạo.',
-      'Nhóm đã xây dựng một ứng dụng học tập đầy đổi mới.',
-    )
+  if (vocabTotal === 0) {
+    let error
 
-    await db.run(
-      `INSERT INTO mcq_questions (question, option_a, option_b, option_c, option_d, answer)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      'Chọn từ đồng nghĩa đúng với "rapid".',
-      'slow',
-      'quick',
-      'tiny',
-      'silent',
-      'quick',
-    )
+    ;({ error } = await supabase.from('vocabulary').insert([
+      {
+        word: 'resilient',
+        definition: 'Có khả năng phục hồi nhanh sau tình huống khó khăn.',
+        example: 'Một học sinh kiên cường vẫn tiếp tục học sau khi mắc lỗi.',
+      },
+      {
+        word: 'innovative',
+        definition: 'Sử dụng ý tưởng mới và sáng tạo.',
+        example: 'Nhóm đã xây dựng một ứng dụng học tập đầy đổi mới.',
+      },
+    ]))
+    assertNoSupabaseError(error, 'Không thể seed từ vựng')
 
-    await db.run(
-      `INSERT INTO mcq_questions (question, option_a, option_b, option_c, option_d, answer)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      'Câu nào dưới đây đúng ngữ pháp?',
-      'She go to school every day.',
-      'She goes to school every day.',
-      'She going to school every day.',
-      'She gone to school every day.',
-      'She goes to school every day.',
-    )
+    ;({ error } = await supabase.from('mcq_questions').insert([
+      {
+        question: 'Chọn từ đồng nghĩa đúng với "rapid".',
+        option_a: 'slow',
+        option_b: 'quick',
+        option_c: 'tiny',
+        option_d: 'silent',
+        answer: 'quick',
+        mode: 'general',
+      },
+      {
+        question: 'Câu nào dưới đây đúng ngữ pháp?',
+        option_a: 'She go to school every day.',
+        option_b: 'She goes to school every day.',
+        option_c: 'She going to school every day.',
+        option_d: 'She gone to school every day.',
+        answer: 'She goes to school every day.',
+        mode: 'general',
+      },
+    ]))
+    assertNoSupabaseError(error, 'Không thể seed câu hỏi trắc nghiệm')
 
-    await db.run(
-      'INSERT INTO matching_questions (word, meaning) VALUES (?, ?)',
-      'diligent',
-      'hard-working and careful',
-    )
-    await db.run(
-      'INSERT INTO matching_questions (word, meaning) VALUES (?, ?)',
-      'ancient',
-      'very old; from long ago',
-    )
-    await db.run(
-      'INSERT INTO matching_questions (word, meaning) VALUES (?, ?)',
-      'thrive',
-      'to grow strongly and successfully',
-    )
+    ;({ error } = await supabase.from('matching_questions').insert([
+      { word: 'diligent', meaning: 'hard-working and careful' },
+      { word: 'ancient', meaning: 'very old; from long ago' },
+      { word: 'thrive', meaning: 'to grow strongly and successfully' },
+    ]))
+    assertNoSupabaseError(error, 'Không thể seed câu hỏi nối từ')
 
-    await db.run(
-      'INSERT INTO writing_questions (word, hint, keywords) VALUES (?, ?, ?)',
-      'resilient',
-      'Viết định nghĩa bằng tiếng Anh và thêm một ví dụ.',
-      JSON.stringify(['recover', 'difficult', 'strong']),
-    )
-    await db.run(
-      'INSERT INTO writing_questions (word, hint, keywords) VALUES (?, ?, ?)',
-      'innovative',
-      'Định nghĩa từ và nhắc đến ý tưởng hoặc phương pháp mới.',
-      JSON.stringify(['new', 'idea', 'method']),
-    )
+    ;({ error } = await supabase.from('writing_questions').insert([
+      {
+        word: 'resilient',
+        hint: 'Viết định nghĩa bằng tiếng Anh và thêm một ví dụ.',
+        keywords: ['recover', 'difficult', 'strong'],
+      },
+      {
+        word: 'innovative',
+        hint: 'Định nghĩa từ và nhắc đến ý tưởng hoặc phương pháp mới.',
+        keywords: ['new', 'idea', 'method'],
+      },
+    ]))
+    assertNoSupabaseError(error, 'Không thể seed câu hỏi viết')
   }
 
-  if (fillCount.total === 0) {
-    await db.run(
-      'INSERT INTO fill_blank_questions (sentence, answer) VALUES (?, ?)',
-      'I usually ___ coffee in the morning.',
-      'drink',
-    )
-    await db.run(
-      'INSERT INTO fill_blank_questions (sentence, answer) VALUES (?, ?)',
-      'If it rains, we ___ at home.',
-      'will stay',
-    )
+  if (fillTotal === 0) {
+    const { error } = await supabase.from('fill_blank_questions').insert([
+      {
+        sentence: 'I usually ___ coffee in the morning.',
+        answer: 'drink',
+      },
+      {
+        sentence: 'If it rains, we ___ at home.',
+        answer: 'will stay',
+      },
+    ])
+    assertNoSupabaseError(error, 'Không thể seed câu điền chỗ trống')
+  }
+}
+
+async function initDatabase() {
+  assertSupabaseConfigured()
+  if (shouldSeedSampleData) {
+    await seedIfEmpty()
   }
 }
 
 async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
   const mcqSourceMode = toMcqExerciseSourceMode(mcqSourceModeInput)
 
-  const vocabularyRows = await db.all(
-    'SELECT id, word, definition, example FROM vocabulary ORDER BY id DESC',
-  )
-
-  const mcqRows = await db.all(
-    `SELECT id, question, option_a, option_b, option_c, option_d, mode, answer
-     FROM mcq_questions ORDER BY id DESC`,
-  )
-
-  const matchingRows = await db.all(
-    'SELECT id, word, meaning FROM matching_questions ORDER BY id DESC',
-  )
-
-  const fillRows = await db.all(
-    'SELECT id, sentence, answer FROM fill_blank_questions ORDER BY id DESC',
-  )
+  const vocabularyRows = await fetchVocabularyRows()
+  const mcqRows = await fetchMcqRows()
+  const matchingRows = await fetchMatchingRows()
+  const fillRows = await fetchFillRows()
+  const writingRows = await fetchWritingRows()
 
   const vocabularyDefinitions = vocabularyRows
     .map((row) => String(row.definition || '').trim())
     .filter(Boolean)
-
-  const writingRows = await db.all(
-    'SELECT id, word, hint, keywords FROM writing_questions ORDER BY id DESC',
-  )
 
   const allMcqAnswerRows = mcqRows
     .map((row) => ({
@@ -472,7 +455,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         id: row.id,
         word: row.word,
         hint: row.hint,
-        keywords: JSON.parse(row.keywords),
+        keywords: Array.isArray(row.keywords) ? row.keywords : [],
       })),
     },
   }
@@ -485,6 +468,7 @@ app.get('/api/health', (_, res) => {
 app.get('/api/database', async (req, res, next) => {
   try {
     const payload = await buildDatabasePayload(req.query.mcqMode)
+    res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120')
     res.json(payload)
   } catch (error) {
     next(error)
@@ -501,12 +485,8 @@ app.post('/api/vocabulary', async (req, res, next) => {
       return res.status(400).json({ message: 'Cần có đầy đủ từ và định nghĩa' })
     }
 
-    await db.run(
-      'INSERT INTO vocabulary (word, definition, example) VALUES (?, ?, ?)',
-      word,
-      definition,
-      example,
-    )
+    const { error } = await supabase.from('vocabulary').insert([{ word, definition, example }])
+    assertNoSupabaseError(error, 'Không thể thêm từ vựng')
 
     return res.status(201).json({ ok: true })
   } catch (error) {
@@ -525,13 +505,11 @@ app.put('/api/vocabulary/:id', async (req, res, next) => {
       return res.status(400).json({ message: 'Dữ liệu gửi lên không hợp lệ' })
     }
 
-    await db.run(
-      'UPDATE vocabulary SET word = ?, definition = ?, example = ? WHERE id = ?',
-      word,
-      definition,
-      example,
-      id,
-    )
+    const { error } = await supabase
+      .from('vocabulary')
+      .update({ word, definition, example })
+      .eq('id', id)
+    assertNoSupabaseError(error, 'Không thể cập nhật từ vựng')
 
     return res.json({ ok: true })
   } catch (error) {
@@ -544,7 +522,23 @@ app.delete('/api/vocabulary/:id', async (req, res, next) => {
     const id = Number(req.params.id)
     if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
 
-    await db.run('DELETE FROM vocabulary WHERE id = ?', id)
+    const { error } = await supabase.from('vocabulary').delete().eq('id', id)
+    assertNoSupabaseError(error, 'Không thể xóa từ vựng')
+
+    return res.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/vocabulary/:id/delete', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id)
+    if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
+
+    const { error } = await supabase.from('vocabulary').delete().eq('id', id)
+    assertNoSupabaseError(error, 'Không thể xóa từ vựng')
+
     return res.json({ ok: true })
   } catch (error) {
     next(error)
@@ -568,20 +562,14 @@ app.post('/api/questions', async (req, res, next) => {
       }
 
       if (!req.body.mode) {
-        const vocabularyHit = await db.get(
-          'SELECT id FROM vocabulary WHERE LOWER(TRIM(definition)) = LOWER(TRIM(?))',
-          answer,
-        )
+        const vocabularyHit = await isVocabularyDefinition(answer)
         if (vocabularyHit) {
           mode = 'vocabulary_definition'
         }
       }
 
       if (mode === 'vocabulary_definition') {
-        const vocabHit = await db.get(
-          'SELECT id FROM vocabulary WHERE LOWER(TRIM(definition)) = LOWER(TRIM(?))',
-          answer,
-        )
+        const vocabHit = await isVocabularyDefinition(answer)
         if (!vocabHit) {
           return res.status(400).json({
             message: 'Với loại từ vựng-định nghĩa, đáp án đúng phải là một định nghĩa đã có trong kho từ vựng.',
@@ -589,17 +577,18 @@ app.post('/api/questions', async (req, res, next) => {
         }
       }
 
-      await db.run(
-        `INSERT INTO mcq_questions (question, option_a, option_b, option_c, option_d, mode, answer)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        question,
-        '',
-        '',
-        '',
-        '',
-        mode,
-        answer,
-      )
+      const { error } = await supabase.from('mcq_questions').insert([
+        {
+          question,
+          option_a: '',
+          option_b: '',
+          option_c: '',
+          option_d: '',
+          mode,
+          answer,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
     }
 
     if (type === 'matching') {
@@ -608,11 +597,8 @@ app.post('/api/questions', async (req, res, next) => {
       if (!word || !meaning) {
         return res.status(400).json({ message: 'Dữ liệu bài nối từ không hợp lệ' })
       }
-      await db.run(
-        'INSERT INTO matching_questions (word, meaning) VALUES (?, ?)',
-        word,
-        meaning,
-      )
+      const { error } = await supabase.from('matching_questions').insert([{ word, meaning }])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi nối từ')
     }
 
     if (type === 'fillBlank') {
@@ -621,11 +607,8 @@ app.post('/api/questions', async (req, res, next) => {
       if (!sentence || !answer) {
         return res.status(400).json({ message: 'Dữ liệu bài điền chỗ trống không hợp lệ' })
       }
-      await db.run(
-        'INSERT INTO fill_blank_questions (sentence, answer) VALUES (?, ?)',
-        sentence,
-        answer,
-      )
+      const { error } = await supabase.from('fill_blank_questions').insert([{ sentence, answer }])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi điền chỗ trống')
     }
 
     if (type === 'writing') {
@@ -637,12 +620,14 @@ app.post('/api/questions', async (req, res, next) => {
       if (!word || !hint) {
         return res.status(400).json({ message: 'Dữ liệu bài viết không hợp lệ' })
       }
-      await db.run(
-        'INSERT INTO writing_questions (word, hint, keywords) VALUES (?, ?, ?)',
-        word,
-        hint,
-        JSON.stringify(keywords),
-      )
+      const { error } = await supabase.from('writing_questions').insert([
+        {
+          word,
+          hint,
+          keywords,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi viết')
     }
 
     return res.status(201).json({ ok: true })
@@ -667,10 +652,7 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
       }
 
       if (mode === 'vocabulary_definition') {
-        const vocabHit = await db.get(
-          'SELECT id FROM vocabulary WHERE LOWER(TRIM(definition)) = LOWER(TRIM(?))',
-          answer,
-        )
+        const vocabHit = await isVocabularyDefinition(answer)
         if (!vocabHit) {
           return res.status(400).json({
             message: 'Với loại từ vựng-định nghĩa, đáp án đúng phải là một định nghĩa đã có trong kho từ vựng.',
@@ -678,19 +660,19 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
         }
       }
 
-      await db.run(
-        `UPDATE mcq_questions
-         SET question = ?, option_a = ?, option_b = ?, option_c = ?, option_d = ?, mode = ?, answer = ?
-         WHERE id = ?`,
-        question,
-        '',
-        '',
-        '',
-        '',
-        mode,
-        answer,
-        id,
-      )
+      const { error } = await supabase
+        .from('mcq_questions')
+        .update({
+          question,
+          option_a: '',
+          option_b: '',
+          option_c: '',
+          option_d: '',
+          mode,
+          answer,
+        })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi trắc nghiệm')
     }
 
     if (type === 'matching') {
@@ -699,12 +681,11 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
       if (!word || !meaning) {
         return res.status(400).json({ message: 'Dữ liệu bài nối từ không hợp lệ' })
       }
-      await db.run(
-        'UPDATE matching_questions SET word = ?, meaning = ? WHERE id = ?',
-        word,
-        meaning,
-        id,
-      )
+      const { error } = await supabase
+        .from('matching_questions')
+        .update({ word, meaning })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi nối từ')
     }
 
     if (type === 'fillBlank') {
@@ -713,12 +694,11 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
       if (!sentence || !answer) {
         return res.status(400).json({ message: 'Dữ liệu bài điền chỗ trống không hợp lệ' })
       }
-      await db.run(
-        'UPDATE fill_blank_questions SET sentence = ?, answer = ? WHERE id = ?',
-        sentence,
-        answer,
-        id,
-      )
+      const { error } = await supabase
+        .from('fill_blank_questions')
+        .update({ sentence, answer })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi điền chỗ trống')
     }
 
     if (type === 'writing') {
@@ -728,13 +708,11 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
       if (!word || !hint) {
         return res.status(400).json({ message: 'Dữ liệu bài viết không hợp lệ' })
       }
-      await db.run(
-        'UPDATE writing_questions SET word = ?, hint = ?, keywords = ? WHERE id = ?',
-        word,
-        hint,
-        JSON.stringify(keywords),
-        id,
-      )
+      const { error } = await supabase
+        .from('writing_questions')
+        .update({ word, hint, keywords })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi viết')
     }
 
     return res.json({ ok: true })
@@ -751,19 +729,23 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
     if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
 
     if (type === 'mcq') {
-      await db.run('DELETE FROM mcq_questions WHERE id = ?', id)
+      const { error } = await supabase.from('mcq_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi trắc nghiệm')
     }
 
     if (type === 'matching') {
-      await db.run('DELETE FROM matching_questions WHERE id = ?', id)
+      const { error } = await supabase.from('matching_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi nối từ')
     }
 
     if (type === 'fillBlank') {
-      await db.run('DELETE FROM fill_blank_questions WHERE id = ?', id)
+      const { error } = await supabase.from('fill_blank_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi điền chỗ trống')
     }
 
     if (type === 'writing') {
-      await db.run('DELETE FROM writing_questions WHERE id = ?', id)
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
     }
 
     return res.json({ ok: true })
@@ -772,9 +754,54 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
   }
 })
 
+app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
+  try {
+    const type = toQuestionType(req.params.type)
+    const id = Number(req.params.id)
+
+    if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
+
+    if (type === 'mcq') {
+      const { error } = await supabase.from('mcq_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi trắc nghiệm')
+    }
+
+    if (type === 'matching') {
+      const { error } = await supabase.from('matching_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi nối từ')
+    }
+
+    if (type === 'fillBlank') {
+      const { error } = await supabase.from('fill_blank_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi điền chỗ trống')
+    }
+
+    if (type === 'writing') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
+    }
+
+    return res.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.use((req, res) => {
+  res.status(404).json({
+    message: `Không tìm thấy endpoint API: ${req.method} ${req.originalUrl}`,
+  })
+})
+
 app.use((error, _, res, __) => {
   console.error(error)
-  res.status(500).json({ message: 'Lỗi máy chủ nội bộ' })
+  const message = String(error?.message || '')
+  if (message.includes('relation') || message.includes('does not exist')) {
+    return res.status(500).json({
+      message: 'Chưa có bảng Supabase. Hãy chạy SQL trong file supabase/schema.sql trước.',
+    })
+  }
+  return res.status(500).json({ message: 'Lỗi máy chủ nội bộ' })
 })
 
 async function start() {
@@ -784,7 +811,26 @@ async function start() {
   })
 }
 
-start().catch((error) => {
-  console.error('Không thể khởi động máy chủ API:', error)
-  process.exit(1)
-})
+export async function initializeApp() {
+  if (!initPromise) {
+    initPromise = initDatabase().catch((error) => {
+      initPromise = null
+      throw error
+    })
+  }
+
+  await initPromise
+}
+
+export default app
+
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false
+
+if (isDirectRun) {
+  start().catch((error) => {
+    console.error('Không thể khởi động máy chủ API:', error)
+    process.exit(1)
+  })
+}

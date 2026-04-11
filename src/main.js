@@ -11,6 +11,7 @@ import {
 
 const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
+const DATABASE_CACHE_TTL_MS = 30_000
 
 function loadSidebarOpenState() {
   const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY)
@@ -46,6 +47,38 @@ const state = {
   mcqNextPromptOpen: false,
   mcqReviewOpen: false,
   mcqWrongQuestions: [],
+  databaseCache: {},
+}
+
+function cloneDatabasePayload(payload) {
+  return JSON.parse(JSON.stringify(payload))
+}
+
+function getDatabaseCacheKey() {
+  if (state.route === '/exercise/mcq') {
+    return `mcq:${state.mcqSourceMode}`
+  }
+  return 'default'
+}
+
+function getCachedDatabaseEntry() {
+  const key = getDatabaseCacheKey()
+  const cached = state.databaseCache[key]
+  if (!cached) return null
+  if (Date.now() - cached.timestamp > DATABASE_CACHE_TTL_MS) return null
+  return cached
+}
+
+function saveDatabaseCache(payload) {
+  const key = getDatabaseCacheKey()
+  state.databaseCache[key] = {
+    timestamp: Date.now(),
+    data: cloneDatabasePayload(payload),
+  }
+}
+
+function clearDatabaseCache() {
+  state.databaseCache = {}
 }
 
 function normalizeText(text) {
@@ -290,10 +323,13 @@ function renderLayout(content) {
     state.database.questions.writing.length
 
   return `
-    <main class="shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
+    <main class="shell app-shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
       <aside class="sidebar">
         <h1>learnEnglish</h1>
         <p class="muted">Luyện tập và quản lý dữ liệu học tiếng Anh.</p>
+
+        <p class="group-title">Điều hướng</p>
+        <button class="nav-btn ${state.route === '/home' ? 'active' : ''}" data-route="/home">Trang chủ</button>
 
         <p class="group-title">Bài tập</p>
         <button class="nav-btn ${state.route === '/exercise/mcq' ? 'active' : ''}" data-route="/exercise/mcq">Trắc nghiệm</button>
@@ -375,18 +411,56 @@ function renderLayout(content) {
   `
 }
 
-async function refreshDatabase() {
-  if (state.route === '/exercise/mcq') {
-    state.database = await fetchDatabase({ mcqMode: state.mcqSourceMode })
-    return
+function renderLandingPage() {
+  return `
+    <main class="landing-shell">
+      <section class="landing-card">
+        <p class="landing-eyebrow">learnEnglish</p>
+        <h1>Luyện tiếng Anh theo cách đơn giản</h1>
+        <p class="landing-subtitle">Bắt đầu nhanh với bộ bài tập và trang quản lý dữ liệu học tập.</p>
+        <div class="landing-actions">
+          <button type="button" class="action-btn" data-route="/exercise/mcq">Vào luyện tập</button>
+          <button type="button" class="small-btn" data-route="/source">Quản lý nguồn dữ liệu</button>
+        </div>
+      </section>
+    </main>
+  `
+}
+
+async function refreshDatabase(options = {}) {
+  const { force = false } = options
+
+  if (!force) {
+    const cached = getCachedDatabaseEntry()
+    if (cached) {
+      state.database = cloneDatabasePayload(cached.data)
+      return
+    }
   }
-  state.database = await fetchDatabase()
+
+  let payload
+  if (state.route === '/exercise/mcq') {
+    payload = await fetchDatabase({ mcqMode: state.mcqSourceMode })
+  } else {
+    payload = await fetchDatabase()
+  }
+
+  state.database = payload
+  saveDatabaseCache(payload)
 }
 
 async function loadDataForCurrentRoute() {
-  state.loading = true
+  if (state.route === '/home') {
+    state.loading = false
+    state.serverError = ''
+    render()
+    return
+  }
+
+  const hasFreshCache = Boolean(getCachedDatabaseEntry())
+  state.loading = !hasFreshCache
   state.serverError = ''
-  render()
+  if (state.loading) render()
 
   try {
     await refreshDatabase()
@@ -402,7 +476,8 @@ async function loadDataForCurrentRoute() {
 async function withRefresh(action, successMessage) {
   try {
     await action()
-    await refreshDatabase()
+    clearDatabaseCache()
+    await refreshDatabase({ force: true })
     resetExerciseState()
     state.sourceMessage = successMessage
     state.sourceMessageType = 'ok'
@@ -837,7 +912,7 @@ function renderSourceMessage() {
 }
 
 function renderCurrentPage() {
-  if (state.route === '/home') return renderLayout(renderHome())
+  if (state.route === '/home') return renderLandingPage()
   if (state.route === '/exercise/mcq') return renderLayout(renderMcqPage())
   if (state.route === '/exercise/matching') return renderLayout(renderMatchingPage())
   if (state.route === '/exercise/fill') return renderLayout(renderFillPage())
@@ -845,7 +920,7 @@ function renderCurrentPage() {
   if (state.route === '/source') return renderLayout(renderSourceHome())
   if (state.route === '/source/vocab') return renderLayout(renderSourceVocab())
   if (state.route === '/source/questions') return renderLayout(renderSourceQuestion())
-  return renderLayout(renderHome())
+  return renderLandingPage()
 }
 
 function attachNavEvents() {
@@ -1266,6 +1341,14 @@ window.addEventListener('hashchange', async () => {
 async function bootstrap() {
   if (!window.location.hash) {
     setRoute('/home')
+    state.loading = false
+    render()
+    return
+  }
+
+  if (state.route === '/home') {
+    state.loading = false
+    render()
     return
   }
 

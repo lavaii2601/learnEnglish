@@ -11,10 +11,9 @@
     "start:api": "node server/index.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
     "cors": "^2.8.5",
-    "express": "^5.1.0",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7"
+    "express": "^5.1.0"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

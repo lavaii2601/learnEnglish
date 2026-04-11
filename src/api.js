@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:3001`
+const API_BASE = import.meta.env.VITE_API_URL
+  || (import.meta.env.DEV
+    ? `${window.location.protocol}//${window.location.hostname}:3001`
+    : '')
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -10,7 +13,7 @@ async function request(path, options = {}) {
   })
 
   if (!response.ok) {
-    let message = 'Yêu cầu thất bại'
+    let message = `Yêu cầu thất bại (HTTP ${response.status})`
     try {
       const payload = await response.json()
       message = payload.message || message
@@ -21,6 +24,16 @@ async function request(path, options = {}) {
   }
 
   return response.json()
+}
+
+async function requestWithDeleteFallback(path, fallbackPath) {
+  try {
+    return await request(path, { method: 'DELETE' })
+  } catch (error) {
+    const is404 = /HTTP\s+404/i.test(String(error?.message || ''))
+    if (!is404) throw error
+    return request(fallbackPath, { method: 'POST' })
+  }
 }
 
 export function fetchDatabase(options = {}) {
@@ -47,9 +60,10 @@ export function updateVocabulary(id, payload) {
 }
 
 export function deleteVocabulary(id) {
-  return request(`/api/vocabulary/${id}`, {
-    method: 'DELETE',
-  })
+  return requestWithDeleteFallback(
+    `/api/vocabulary/${id}`,
+    `/api/vocabulary/${id}/delete`,
+  )
 }
 
 export function createQuestion(payload) {
@@ -67,7 +81,8 @@ export function updateQuestion(type, id, payload) {
 }
 
 export function deleteQuestion(type, id) {
-  return request(`/api/questions/${type}/${id}`, {
-    method: 'DELETE',
-  })
+  return requestWithDeleteFallback(
+    `/api/questions/${type}/${id}`,
+    `/api/questions/${type}/${id}/delete`,
+  )
 }
