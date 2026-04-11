@@ -343,8 +343,11 @@ function renderLayout(content) {
     '/source/questions': 'Thêm câu hỏi',
   }
 
+  const questionAnswerCount = state.database.questions.mcq.length
+  const vocabularyCount = state.database.vocabulary.length
+  const mcqTotalCount = vocabularyCount + questionAnswerCount
   const totalQuestions =
-    getMcqExerciseItems().length +
+    questionAnswerCount +
     state.database.questions.matching.length +
     state.database.questions.fillBlank.length +
     state.database.questions.writing.length
@@ -385,10 +388,10 @@ function renderLayout(content) {
           </header>
           <p class="muted">Theo dõi dữ liệu chính mà không cần rời menu.</p>
           <div class="slide-stat-grid">
-            <article><span>Từ vựng</span><strong>${state.database.vocabulary.length}</strong></article>
             <article><span>Tổng câu hỏi</span><strong>${totalQuestions}</strong></article>
-            <article><span>Trắc nghiệm</span><strong>${getMcqExerciseItems().length}</strong></article>
-            <article><span>Điền trống</span><strong>${state.database.questions.fillBlank.length}</strong></article>
+            <article><span>Từ vựng</span><strong>${vocabularyCount}</strong></article>
+            <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
+            <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
           </div>
         </section>
       </aside>
