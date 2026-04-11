@@ -80,6 +80,7 @@ function toQuestionType(type) {
   if (type === 'matching') return 'matching'
   if (type === 'fillBlank') return 'fillBlank'
   if (type === 'writing') return 'writing'
+  if (type === 'listing') return 'listing'
   return null
 }
 
@@ -277,6 +278,15 @@ async function fetchWritingRows() {
   return data || []
 }
 
+async function fetchListingRows() {
+  const { data, error } = await supabase
+    .from('listing_questions')
+    .select('id, prompt, hint, answers')
+    .order('id', { ascending: false })
+  assertNoSupabaseError(error, 'Không thể tải câu hỏi liệt kê')
+  return data || []
+}
+
 async function vocabularyCount() {
   const { count, error } = await supabase
     .from('vocabulary')
@@ -364,6 +374,15 @@ async function seedIfEmpty() {
       },
     ]))
     assertNoSupabaseError(error, 'Không thể seed câu hỏi viết')
+
+    ;({ error } = await supabase.from('listing_questions').insert([
+      {
+        prompt: 'Liệt kê 3 lợi ích của việc đọc sách mỗi ngày.',
+        hint: 'Viết ngắn gọn, mỗi dòng một ý.',
+        answers: ['improves vocabulary', 'reduces stress', 'expands knowledge'],
+      },
+    ]))
+    assertNoSupabaseError(error, 'Không thể seed câu hỏi liệt kê')
   }
 
   if (fillTotal === 0) {
@@ -398,12 +417,14 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     matchingRows,
     fillRows,
     writingRows,
+    listingRows,
   ] = await Promise.all([
     fetchVocabularyRows(),
     fetchMcqRows(),
     fetchMatchingRows(),
     fetchFillRows(),
     fetchWritingRows(),
+    fetchListingRows(),
   ])
 
   const vocabularyDefinitions = vocabularyRows
@@ -488,6 +509,12 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         word: row.word,
         hint: row.hint,
         keywords: Array.isArray(row.keywords) ? row.keywords : [],
+      })),
+      listing: listingRows.map((row) => ({
+        id: row.id,
+        prompt: row.prompt,
+        hint: row.hint,
+        answers: Array.isArray(row.answers) ? row.answers : [],
       })),
     },
   }
@@ -648,6 +675,29 @@ app.post('/api/questions', async (req, res, next) => {
       assertNoSupabaseError(error, 'Không thể thêm đề viết')
     }
 
+    if (type === 'listing') {
+      const prompt = String(req.body.prompt || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answers = Array.isArray(req.body.answers)
+        ? req.body.answers
+          .map((line) => String(line || '').trim())
+          .filter(Boolean)
+        : []
+
+      if (!prompt || !answers.length) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi liệt kê không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('listing_questions').insert([
+        {
+          prompt,
+          hint,
+          answers,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi liệt kê')
+    }
+
     if (!type) {
       return res.status(400).json({ message: 'Loại câu hỏi không hợp lệ' })
     }
@@ -743,6 +793,27 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
       clearDatabaseResponseCache()
     }
 
+    if (type === 'listing') {
+      const prompt = String(req.body.prompt || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answers = Array.isArray(req.body.answers)
+        ? req.body.answers
+          .map((line) => String(line || '').trim())
+          .filter(Boolean)
+        : []
+
+      if (!prompt || !answers.length) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi liệt kê không hợp lệ' })
+      }
+
+      const { error } = await supabase
+        .from('listing_questions')
+        .update({ prompt, hint, answers })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi liệt kê')
+      clearDatabaseResponseCache()
+    }
+
     return res.json({ ok: true })
   } catch (error) {
     next(error)
@@ -780,6 +851,12 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
       clearDatabaseResponseCache()
     }
 
+    if (type === 'listing') {
+      const { error } = await supabase.from('listing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
+      clearDatabaseResponseCache()
+    }
+
     return res.json({ ok: true })
   } catch (error) {
     next(error)
@@ -814,6 +891,12 @@ app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
     if (type === 'writing') {
       const { error } = await supabase.from('writing_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
+      clearDatabaseResponseCache()
+    }
+
+    if (type === 'listing') {
+      const { error } = await supabase.from('listing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
       clearDatabaseResponseCache()
     }
 

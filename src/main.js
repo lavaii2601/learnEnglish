@@ -24,12 +24,13 @@ const state = {
   route: getRoute(),
   database: {
     vocabulary: [],
-    questions: { mcq: [], matching: [], fillBlank: [], writing: [] },
+    questions: { mcq: [], matching: [], fillBlank: [], writing: [], listing: [] },
   },
   mcqAnswers: [],
   matchAnswers: {},
   blankAnswers: [],
   writingAnswers: [],
+  listingAnswers: [],
   slideBoardOpen: false,
   sidebarOpen: loadSidebarOpenState(),
   resultNotice: null,
@@ -257,7 +258,12 @@ function startMcqQuizRound(useWrongOnly = false) {
 }
 
 function resetExerciseState() {
-  const { matching, fillBlank, writing } = state.database.questions
+  const {
+    matching,
+    fillBlank,
+    writing,
+    listing = [],
+  } = state.database.questions
   prepareMcqPool()
   state.mcqQuizQuestions = []
   state.mcqAnswers = []
@@ -269,6 +275,7 @@ function resetExerciseState() {
   state.matchAnswers = Object.fromEntries(matching.map((item) => [item.id, '']))
   state.blankAnswers = Array(fillBlank.length).fill('')
   state.writingAnswers = Array(writing.length).fill('')
+  state.listingAnswers = Array(listing.length).fill('')
 }
 
 function scoreMcq() {
@@ -340,6 +347,49 @@ function getWritingCorrectCount() {
   return scores.filter((item) => item.percent >= 60).length
 }
 
+function scoreListing() {
+  return (state.database.questions.listing || []).map((item, index) => {
+    const expectedLines = (Array.isArray(item.answers) ? item.answers : [])
+      .map((line) => normalizeListLine(line))
+      .filter(Boolean)
+    const userLines = parseAnswerLines(state.listingAnswers[index] || '')
+
+    const remainingUserLines = [...userLines]
+    let hitCount = 0
+
+    expectedLines.forEach((expectedLine) => {
+      const exactIndex = remainingUserLines.findIndex((line) => line === expectedLine)
+      if (exactIndex >= 0) {
+        hitCount += 1
+        remainingUserLines.splice(exactIndex, 1)
+        return
+      }
+
+      const fuzzyIndex = remainingUserLines.findIndex((line) => linesMatch(line, expectedLine))
+      if (fuzzyIndex >= 0) {
+        hitCount += 1
+        remainingUserLines.splice(fuzzyIndex, 1)
+      }
+    })
+
+    const totalExpected = expectedLines.length
+    const percent = totalExpected
+      ? Math.round((hitCount / totalExpected) * 100)
+      : 0
+
+    return {
+      hitCount,
+      total: totalExpected,
+      percent,
+    }
+  })
+}
+
+function getListingCorrectCount() {
+  const scores = scoreListing()
+  return scores.filter((item) => item.percent >= 60).length
+}
+
 function isMcqRoundComplete() {
   if (!state.mcqQuizQuestions.length) return false
   return state.mcqAnswers.every((answer) => String(answer || '').trim().length > 0)
@@ -403,6 +453,12 @@ function openResultNotice(type) {
     title = 'Kết quả viết định nghĩa'
   }
 
+  if (type === 'listing') {
+    correct = getListingCorrectCount()
+    total = (state.database.questions.listing || []).length
+    title = 'Kết quả bài liệt kê'
+  }
+
   state.resultNotice = {
     type,
     title,
@@ -419,6 +475,7 @@ function renderLayout(content) {
     '/exercise/matching': 'Nối từ',
     '/exercise/fill': 'Điền chỗ trống',
     '/exercise/writing': 'Viết định nghĩa',
+    '/exercise/listing': 'Liệt kê ý',
     '/source': 'Thêm nguồn',
     '/source/vocab': 'Thêm từ vựng',
     '/source/questions': 'Thêm câu hỏi',
@@ -431,7 +488,22 @@ function renderLayout(content) {
     questionAnswerCount +
     state.database.questions.matching.length +
     state.database.questions.fillBlank.length +
-    state.database.questions.writing.length
+    state.database.questions.writing.length +
+    (state.database.questions.listing || []).length
+
+  const quickBoardMarkup = `
+    <header class="slide-board-head">
+      <strong>Bảng nhanh</strong>
+      <button type="button" class="slide-board-close" data-toggle-slide-board="true">Đóng</button>
+    </header>
+    <p class="muted">Theo dõi dữ liệu chính mà không cần rời menu.</p>
+    <div class="slide-stat-grid">
+      <article><span>Tổng câu hỏi</span><strong>${totalQuestions}</strong></article>
+      <article><span>Từ vựng</span><strong>${vocabularyCount}</strong></article>
+      <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
+      <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
+    </div>
+  `
 
   return `
     <main class="shell app-shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
@@ -447,6 +519,7 @@ function renderLayout(content) {
         <button class="nav-btn ${state.route === '/exercise/matching' ? 'active' : ''}" data-route="/exercise/matching">Nối từ</button>
         <button class="nav-btn ${state.route === '/exercise/fill' ? 'active' : ''}" data-route="/exercise/fill">Điền chỗ trống</button>
         <button class="nav-btn ${state.route === '/exercise/writing' ? 'active' : ''}" data-route="/exercise/writing">Viết</button>
+        <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing">Liệt kê</button>
 
         <p class="group-title">Nguồn dữ liệu</p>
         <button class="nav-btn ${state.route === '/source' ? 'active' : ''}" data-route="/source">Trang thêm nguồn</button>
@@ -463,19 +536,20 @@ function renderLayout(content) {
         </button>
 
         <section class="slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
-          <header class="slide-board-head">
-            <strong>Bảng nhanh</strong>
-            <button type="button" class="slide-board-close" data-toggle-slide-board="true">Đóng</button>
-          </header>
-          <p class="muted">Theo dõi dữ liệu chính mà không cần rời menu.</p>
-          <div class="slide-stat-grid">
-            <article><span>Tổng câu hỏi</span><strong>${totalQuestions}</strong></article>
-            <article><span>Từ vựng</span><strong>${vocabularyCount}</strong></article>
-            <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
-            <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
-          </div>
+          ${quickBoardMarkup}
         </section>
       </aside>
+
+      <button
+        type="button"
+        class="mobile-slide-board-backdrop ${state.slideBoardOpen ? 'open' : ''}"
+        data-toggle-slide-board="true"
+        aria-label="Đóng bảng nhanh"
+      ></button>
+
+      <section class="mobile-slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
+        ${quickBoardMarkup}
+      </section>
 
       <button
         type="button"
@@ -608,6 +682,7 @@ function renderHome() {
   const matchingCount = state.database.questions.matching.length
   const blankCount = state.database.questions.fillBlank.length
   const writingCount = state.database.questions.writing.length
+  const listingCount = (state.database.questions.listing || []).length
 
   return `
     <section class="page-card">
@@ -619,6 +694,7 @@ function renderHome() {
         <article><strong>${matchingCount}</strong><span>Cặp nối từ</span></article>
         <article><strong>${blankCount}</strong><span>Câu điền trống</span></article>
         <article><strong>${writingCount}</strong><span>Đề viết</span></article>
+        <article><strong>${listingCount}</strong><span>Bài liệt kê</span></article>
       </div>
     </section>
   `
@@ -871,6 +947,36 @@ function renderWritingPage() {
   `
 }
 
+function renderListingPage() {
+  const items = state.database.questions.listing || []
+  const scores = scoreListing()
+  const correctCount = getListingCorrectCount()
+
+  return `
+    <section class="page-card">
+      <h2>Liệt kê ý</h2>
+      ${items
+        .map(
+          (item, index) => `
+            <article class="question-card">
+              <h3 class="question-title">
+                <span class="question-order">Câu hỏi liệt kê</span>
+                <span class="question-text">${escapeHtml(item.prompt)}</span>
+              </h3>
+              <p class="question-hint">${escapeHtml(item.hint || 'Liệt kê các ý theo từng dòng.')}</p>
+              <p class="muted">Mỗi dòng là 1 ý. Không cần đúng thứ tự.</p>
+              <textarea data-listing-index="${index}" rows="6" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.listingAnswers[index] || '')}</textarea>
+              <p class="muted">Độ khớp theo dòng: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
+            </article>
+          `,
+        )
+        .join('')}
+      <p class="score-line">Câu đạt yêu cầu (>= 60%): <strong>${correctCount}/${items.length}</strong></p>
+      <button type="button" class="action-btn" data-check-result="listing">Kiểm tra kết quả</button>
+    </section>
+  `
+}
+
 function renderSourceHome() {
   return `
     <section class="page-card">
@@ -1003,6 +1109,7 @@ function renderManagedQuestions() {
 function renderSourceQuestion() {
   const questionAnswerList = state.database.questions.mcq || []
   const writingQuestionList = state.database.questions.writing || []
+  const listingQuestionList = state.database.questions.listing || []
 
   return `
     <section class="page-card">
@@ -1023,6 +1130,17 @@ function renderSourceQuestion() {
           <textarea name="keywordsText" rows="5" required placeholder="- recover quickly after difficulties&#10;- stay strong under pressure&#10;- bounce back from problems"></textarea>
         </label>
         <button type="submit">Lưu đề viết</button>
+      </form>
+
+      <h3>Thêm câu hỏi liệt kê</h3>
+      <form id="listing-question-form" class="stack-form">
+        <label>Câu hỏi liệt kê<input name="prompt" required placeholder="Liệt kê 3 lợi ích của việc đọc sách" /></label>
+        <label>Gợi ý<input name="hint" placeholder="Mỗi dòng một ý ngắn" /></label>
+        <label>
+          Đáp án mẫu theo dòng
+          <textarea name="answersText" rows="5" required placeholder="- improves vocabulary&#10;- reduces stress&#10;- expands knowledge"></textarea>
+        </label>
+        <button type="submit">Lưu câu hỏi liệt kê</button>
       </form>
 
       <h3>Quản lý câu hỏi/câu trả lời (sửa/xóa)</h3>
@@ -1070,6 +1188,29 @@ function renderSourceQuestion() {
           : '<p class="muted">Chưa có đề viết nào.</p>'}
       </div>
 
+      <h3>Quản lý câu hỏi liệt kê (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${listingQuestionList.length
+          ? listingQuestionList
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <strong>${escapeHtml(item.prompt)}</strong>
+                    <p>${escapeHtml(item.hint || '')}</p>
+                    <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml((item.answers || []).join(' | '))}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button class="small-btn" data-edit-listing-question="${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-listing-question="${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
+      </div>
+
       ${renderSourceMessage()}
     </section>
   `
@@ -1086,6 +1227,7 @@ function renderCurrentPage() {
   if (state.route === '/exercise/matching') return renderLayout(renderMatchingPage())
   if (state.route === '/exercise/fill') return renderLayout(renderFillPage())
   if (state.route === '/exercise/writing') return renderLayout(renderWritingPage())
+  if (state.route === '/exercise/listing') return renderLayout(renderListingPage())
   if (state.route === '/source') return renderLayout(renderSourceHome())
   if (state.route === '/source/vocab') return renderLayout(renderSourceVocab())
   if (state.route === '/source/questions') return renderLayout(renderSourceQuestion())
@@ -1116,6 +1258,15 @@ function attachNavEvents() {
 
   document.querySelectorAll('[data-toggle-slide-board]').forEach((button) => {
     button.addEventListener('click', () => {
+      const isMobile = window.innerWidth <= 980
+      if (isMobile && !state.slideBoardOpen) {
+        state.slideBoardOpen = true
+        state.sidebarOpen = false
+        window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
+        render()
+        return
+      }
+
       state.slideBoardOpen = !state.slideBoardOpen
       render()
     })
@@ -1125,9 +1276,7 @@ function attachNavEvents() {
     button.addEventListener('click', () => {
       state.sidebarOpen = !state.sidebarOpen
       window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
-      if (!state.sidebarOpen) {
-        state.slideBoardOpen = false
-      }
+      state.slideBoardOpen = false
       render()
     })
   })
@@ -1187,6 +1336,14 @@ function attachExerciseEvents() {
     textarea.addEventListener('input', (event) => {
       const target = event.target
       state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
+      render()
+    })
+  })
+
+  document.querySelectorAll('textarea[data-listing-index]').forEach((textarea) => {
+    textarea.addEventListener('input', (event) => {
+      const target = event.target
+      state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
       render()
     })
   })
@@ -1412,6 +1569,34 @@ function attachSourceEvents() {
     })
   }
 
+  const listingQuestionForm = document.querySelector('#listing-question-form')
+  if (listingQuestionForm) {
+    listingQuestionForm.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const formData = new FormData(listingQuestionForm)
+      const answers = parseWritingSampleLines(formData.get('answersText'))
+      if (!answers.length) {
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      withRefresh(
+        async () => {
+          await createQuestion({
+            type: 'listing',
+            prompt: formData.get('prompt').trim(),
+            hint: (formData.get('hint') || '').trim(),
+            answers,
+          })
+          listingQuestionForm.reset()
+        },
+        'Đã lưu câu hỏi liệt kê.',
+      )
+    })
+  }
+
   document.querySelectorAll('[data-delete-question-answer]').forEach((button) => {
     button.addEventListener('click', () => {
       const id = Number(button.dataset.deleteQuestionAnswer)
@@ -1501,6 +1686,59 @@ function attachSourceEvents() {
           })
         },
         'Đã cập nhật đề viết.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-delete-listing-question]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.deleteListingQuestion)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion('listing', id)
+        },
+        'Đã xóa câu hỏi liệt kê.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-edit-listing-question]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.editListingQuestion)
+      if (!id) return
+
+      const item = (state.database.questions.listing || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      const prompt = window.prompt('Câu hỏi liệt kê', item.prompt)
+      if (prompt === null) return
+      const hint = window.prompt('Gợi ý', item.hint || '')
+      if (hint === null) return
+      const answersText = window.prompt(
+        'Đáp án mẫu theo dòng (mỗi dòng 1 đáp án)',
+        (item.answers || []).join('\n'),
+      )
+      if (answersText === null) return
+
+      const answers = parseWritingSampleLines(answersText)
+      if (!answers.length) {
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      withRefresh(
+        async () => {
+          await updateQuestion('listing', id, {
+            prompt: prompt.trim(),
+            hint: hint.trim(),
+            answers,
+          })
+        },
+        'Đã cập nhật câu hỏi liệt kê.',
       )
     })
   })
