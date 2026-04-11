@@ -2,8 +2,10 @@ import './style.css'
 import {
   createQuestion,
   createVocabulary,
+  deleteQuestion,
   deleteVocabulary,
   fetchDatabase,
+  updateQuestion,
   updateVocabulary,
 } from './api'
 
@@ -909,6 +911,8 @@ function renderManagedQuestions() {
 }
 
 function renderSourceQuestion() {
+  const questionAnswerList = state.database.questions.mcq || []
+
   return `
     <section class="page-card">
       <h2>Nhiệm vụ: Thêm câu hỏi + câu trả lời</h2>
@@ -918,6 +922,29 @@ function renderSourceQuestion() {
         <label>Đáp án đúng<input name="answer" required placeholder="Có khả năng phục hồi nhanh sau khó khăn" /></label>
         <button type="submit">Lưu câu hỏi vào cơ sở dữ liệu</button>
       </form>
+
+      <h3>Quản lý câu hỏi/câu trả lời (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${questionAnswerList.length
+          ? questionAnswerList
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <strong>${escapeHtml(item.question)}</strong>
+                    <p class="muted">Đáp án: ${escapeHtml(item.answer)}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button class="small-btn" data-edit-question-answer="${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-question-answer="${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có câu hỏi/câu trả lời nào.</p>'}
+      </div>
+
       ${renderSourceMessage()}
     </section>
   `
@@ -1214,6 +1241,46 @@ function attachSourceEvents() {
       )
     })
   }
+
+  document.querySelectorAll('[data-delete-question-answer]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.deleteQuestionAnswer)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion('mcq', id)
+        },
+        'Đã xóa câu hỏi/câu trả lời.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-edit-question-answer]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.editQuestionAnswer)
+      if (!id) return
+
+      const item = (state.database.questions.mcq || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      const question = window.prompt('Câu hỏi', item.question)
+      if (question === null) return
+      const answer = window.prompt('Đáp án đúng', item.answer)
+      if (answer === null) return
+
+      withRefresh(
+        async () => {
+          await updateQuestion('mcq', id, {
+            mode: 'general',
+            question: question.trim(),
+            answer: answer.trim(),
+          })
+        },
+        'Đã cập nhật câu hỏi/câu trả lời.',
+      )
+    })
+  })
 }
 
 function attachEvents() {
