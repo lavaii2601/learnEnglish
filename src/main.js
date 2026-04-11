@@ -163,13 +163,43 @@ function getShuffledItems(items) {
   return list
 }
 
+function pickMixedQuizItems(pool, maxCount) {
+  if (!Array.isArray(pool) || maxCount <= 0) return []
+
+  const vocabularyItems = pool.filter((item) => item?.source === 'vocabulary')
+  const questionItems = pool.filter((item) => item?.source === 'question')
+
+  const shuffledVocabulary = getShuffledItems(vocabularyItems)
+  const shuffledQuestions = getShuffledItems(questionItems)
+  const picked = []
+
+  // Guarantee at least one question from each source when both sources exist.
+  if (shuffledVocabulary.length && shuffledQuestions.length && maxCount >= 2) {
+    picked.push(shuffledQuestions.pop())
+    picked.push(shuffledVocabulary.pop())
+  }
+
+  const remainingPool = getShuffledItems([
+    ...shuffledQuestions,
+    ...shuffledVocabulary,
+  ])
+
+  while (picked.length < maxCount && remainingPool.length) {
+    picked.push(remainingPool.pop())
+  }
+
+  return getShuffledItems(picked)
+}
+
 function startMcqQuizRound(useWrongOnly = false) {
   const source = useWrongOnly && state.mcqWrongQuestions?.length
     ? state.mcqWrongQuestions
     : state.mcqPoolQuestions
   const pool = Array.isArray(source) ? source : []
   const maxCount = Math.min(state.mcqQuestionCount || 5, pool.length)
-  const quizItems = getShuffledItems(pool).slice(0, maxCount)
+  const quizItems = state.mcqSourceMode === 'mix'
+    ? pickMixedQuizItems(pool, maxCount)
+    : getShuffledItems(pool).slice(0, maxCount)
 
   state.mcqQuizQuestions = quizItems
   state.mcqAnswers = Array(quizItems.length).fill('')
