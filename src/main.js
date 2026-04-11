@@ -12,6 +12,7 @@ import {
 const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
 const DATABASE_CACHE_TTL_MS = 30_000
+const LISTING_MATCH_THRESHOLD = 0.7
 
 function loadSidebarOpenState() {
   const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY)
@@ -31,6 +32,7 @@ const state = {
   blankAnswers: [],
   writingAnswers: [],
   listingAnswers: [],
+  listingChecked: false,
   slideBoardOpen: false,
   sidebarOpen: loadSidebarOpenState(),
   resultNotice: null,
@@ -50,6 +52,8 @@ const state = {
   mcqReviewOpen: false,
   mcqWrongQuestions: [],
   databaseCache: {},
+  listingPreparedCacheKey: '',
+  listingPreparedCacheItems: [],
 }
 
 function cloneDatabasePayload(payload) {
@@ -110,6 +114,66 @@ function parseWritingSampleLines(value) {
     .split(/\r?\n/)
     .map((line) => cleanListLine(line))
     .filter(Boolean)
+}
+
+function tokenizeWords(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((word) => word.trim())
+    .filter(Boolean)
+}
+
+function getListingPreparedItems() {
+  const list = state.database.questions.listing || []
+  const cacheKey = JSON.stringify(
+    list.map((item) => ({
+      id: item.id,
+      answers: Array.isArray(item.answers) ? item.answers : [],
+    })),
+  )
+
+  if (cacheKey === state.listingPreparedCacheKey) {
+    return state.listingPreparedCacheItems
+  }
+
+  const preparedItems = list.map((item) => {
+    const expectedEntries = (Array.isArray(item.answers) ? item.answers : [])
+      .map((line) => cleanListLine(line))
+      .filter(Boolean)
+      .map((line) => ({
+        raw: line,
+        normalized: normalizeListLine(line),
+        words: tokenizeWords(normalizeListLine(line)),
+      }))
+
+    return {
+      ...item,
+      expectedEntries,
+    }
+  })
+
+  state.listingPreparedCacheKey = cacheKey
+  state.listingPreparedCacheItems = preparedItems
+  return preparedItems
+}
+
+function getWordMatchDetail(expectedWords, userWords) {
+  const expectedUnique = [...new Set(expectedWords)]
+  const userWordSet = new Set(userWords)
+  const words = expectedUnique.map((word) => ({
+    word,
+    matched: userWordSet.has(word),
+  }))
+  const matchedCount = words.filter((item) => item.matched).length
+  const ratio = expectedUnique.length ? matchedCount / expectedUnique.length : 0
+
+  return {
+    words,
+    matchedCount,
+    totalWords: expectedUnique.length,
+    ratio,
+  }
 }
 
 function linesMatch(userLine, expectedLine) {
@@ -276,6 +340,7 @@ function resetExerciseState() {
   state.blankAnswers = Array(fillBlank.length).fill('')
   state.writingAnswers = Array(writing.length).fill('')
   state.listingAnswers = Array(listing.length).fill('')
+  state.listingChecked = false
 }
 
 function scoreMcq() {
@@ -342,37 +407,70 @@ function scoreWriting() {
   })
 }
 
-function getWritingCorrectCount() {
-  const scores = scoreWriting()
+function getWritingCorrectCount(scores = scoreWriting()) {
   return scores.filter((item) => item.percent >= 60).length
 }
 
 function scoreListing() {
-  return (state.database.questions.listing || []).map((item, index) => {
-    const expectedLines = (Array.isArray(item.answers) ? item.answers : [])
-      .map((line) => normalizeListLine(line))
-      .filter(Boolean)
-    const userLines = parseAnswerLines(state.listingAnswers[index] || '')
+  return getListingPreparedItems().map((item, index) => {
+    const userLines = parseWritingSampleLines(state.listingAnswers[index] || '')
 
-    const remainingUserLines = [...userLines]
-    let hitCount = 0
+    const usedUserIndexes = new Set()
+    const ideaDetails = item.expectedEntries.map((expectedEntry) => {
+      const expectedNormalized = expectedEntry.normalized
+      const expectedWords = expectedEntry.words
 
-    expectedLines.forEach((expectedLine) => {
-      const exactIndex = remainingUserLines.findIndex((line) => line === expectedLine)
-      if (exactIndex >= 0) {
-        hitCount += 1
-        remainingUserLines.splice(exactIndex, 1)
-        return
+      let bestUserIndex = -1
+      let bestRatio = 0
+      let bestWordDetail = {
+        words: [],
+        matchedCount: 0,
+        totalWords: expectedWords.length,
+        ratio: 0,
       }
 
-      const fuzzyIndex = remainingUserLines.findIndex((line) => linesMatch(line, expectedLine))
-      if (fuzzyIndex >= 0) {
-        hitCount += 1
-        remainingUserLines.splice(fuzzyIndex, 1)
+      userLines.forEach((userLine, userIndex) => {
+        if (usedUserIndexes.has(userIndex)) return
+
+        const userNormalized = normalizeListLine(userLine)
+        const userWords = tokenizeWords(userNormalized)
+        const wordDetail = getWordMatchDetail(expectedWords, userWords)
+
+        let ratio = wordDetail.ratio
+        if (userNormalized === expectedNormalized) {
+          ratio = 1
+        } else if (linesMatch(userNormalized, expectedNormalized)) {
+          ratio = Math.max(ratio, LISTING_MATCH_THRESHOLD)
+        }
+
+        if (ratio > bestRatio) {
+          bestRatio = ratio
+          bestUserIndex = userIndex
+          bestWordDetail = {
+            ...wordDetail,
+            ratio,
+          }
+        }
+      })
+
+      const isCorrect = bestRatio >= LISTING_MATCH_THRESHOLD
+      if (isCorrect && bestUserIndex >= 0) {
+        usedUserIndexes.add(bestUserIndex)
+      }
+
+      return {
+        expected: expectedEntry.raw,
+        user: bestUserIndex >= 0 ? userLines[bestUserIndex] : '',
+        isCorrect,
+        matchPercent: Math.round(bestRatio * 100),
+        matchedCount: bestWordDetail.matchedCount,
+        totalWords: bestWordDetail.totalWords,
+        words: bestWordDetail.words,
       }
     })
 
-    const totalExpected = expectedLines.length
+    const hitCount = ideaDetails.filter((item) => item.isCorrect).length
+    const totalExpected = item.expectedEntries.length
     const percent = totalExpected
       ? Math.round((hitCount / totalExpected) * 100)
       : 0
@@ -381,13 +479,13 @@ function scoreListing() {
       hitCount,
       total: totalExpected,
       percent,
+      ideaDetails,
     }
   })
 }
 
-function getListingCorrectCount() {
-  const scores = scoreListing()
-  return scores.filter((item) => item.percent >= 60).length
+function getListingCorrectCount(scores = scoreListing()) {
+  return scores.filter((item) => item.percent >= LISTING_MATCH_THRESHOLD * 100).length
 }
 
 function isMcqRoundComplete() {
@@ -448,15 +546,18 @@ function openResultNotice(type) {
   }
 
   if (type === 'writing') {
-    correct = getWritingCorrectCount()
+    const writingScores = scoreWriting()
+    correct = getWritingCorrectCount(writingScores)
     total = state.database.questions.writing.length
     title = 'Kết quả viết định nghĩa'
   }
 
   if (type === 'listing') {
-    correct = getListingCorrectCount()
+    const listingScores = scoreListing()
+    correct = getListingCorrectCount(listingScores)
     total = (state.database.questions.listing || []).length
     title = 'Kết quả bài liệt kê'
+    state.listingChecked = true
   }
 
   state.resultNotice = {
@@ -508,7 +609,7 @@ function renderLayout(content) {
   return `
     <main class="shell app-shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
       <aside class="sidebar">
-        <h1>learnEnglish</h1>
+        <h1>Học tiếng Anh cùng Hồng Nga</h1>
         <p class="muted">Luyện tập và quản lý dữ liệu học tiếng Anh.</p>
 
         <p class="group-title">Điều hướng</p>
@@ -572,7 +673,7 @@ function renderLayout(content) {
               <span></span>
               <span></span>
             </button>
-            <p class="route-pill">${routeTitleMap[state.route] || 'learnEnglish'}</p>
+            <p class="route-pill">${routeTitleMap[state.route] || 'Học tiếng Anh cùng Hồng Nga'}</p>
           </div>
           <p class="muted">Dữ liệu đang truy xuất từ backend SQLite.</p>
         </header>
@@ -600,8 +701,8 @@ function renderLandingPage() {
   return `
     <main class="landing-shell">
       <section class="landing-card">
-        <p class="landing-eyebrow">learnEnglish</p>
-        <h1>Luyện tiếng Anh theo cách đơn giản</h1>
+        <p class="landing-eyebrow">Học tiếng Anh cùng Hồng Nga</p>
+        <h1>Luyện tiếng Anh 5 cùng Hồng Nga</h1>
         <p class="landing-subtitle">Bắt đầu nhanh với bộ bài tập và trang quản lý dữ liệu học tập.</p>
         <div class="landing-actions">
           <button type="button" class="action-btn" data-route="/exercise/mcq">Vào luyện tập</button>
@@ -686,7 +787,7 @@ function renderHome() {
 
   return `
     <section class="page-card">
-      <h2>learnEnglish</h2>
+      <h2>Học tiếng Anh cùng Hồng Nga</h2>
       <p>Chọn tính năng ở menu bên trái. Mỗi bài tập sẽ được chấm dựa trên dữ liệu đang lưu trong cơ sở dữ liệu.</p>
       <div class="stat-grid">
         <article><strong>${vocabCount}</strong><span>Từ vựng</span></article>
@@ -920,7 +1021,7 @@ function renderFillPage() {
 function renderWritingPage() {
   const items = state.database.questions.writing
   const scores = scoreWriting()
-  const correctCount = getWritingCorrectCount()
+  const correctCount = getWritingCorrectCount(scores)
 
   return `
     <section class="page-card">
@@ -950,7 +1051,8 @@ function renderWritingPage() {
 function renderListingPage() {
   const items = state.database.questions.listing || []
   const scores = scoreListing()
-  const correctCount = getListingCorrectCount()
+  const correctCount = getListingCorrectCount(scores)
+  const listingThresholdPercent = Math.round(LISTING_MATCH_THRESHOLD * 100)
 
   return `
     <section class="page-card">
@@ -967,11 +1069,31 @@ function renderListingPage() {
               <p class="muted">Mỗi dòng là 1 ý. Không cần đúng thứ tự.</p>
               <textarea data-listing-index="${index}" rows="6" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.listingAnswers[index] || '')}</textarea>
               <p class="muted">Độ khớp theo dòng: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
+              ${state.listingChecked
+      ? `
+                <div class="listing-review-block">
+                  <p class="muted"><strong>Đáp án đúng và đối chiếu chi tiết:</strong></p>
+                  ${(scores[index].ideaDetails || [])
+      .map((detail) => `
+                      <article class="listing-review-item ${detail.isCorrect ? 'ok' : 'wrong'}">
+                        <p><strong>Ý chuẩn:</strong> ${escapeHtml(detail.expected)}</p>
+                        <p><strong>Bạn trả lời:</strong> ${escapeHtml(detail.user || '(chưa có ý phù hợp)')}</p>
+                        <p class="muted">Khớp từ: ${detail.matchedCount}/${detail.totalWords} (${detail.matchPercent}%)</p>
+                        <p class="muted">Từ chi tiết: ${detail.words
+            .map((word) => (word.matched ? `✓ ${word.word}` : `✗ ${word.word}`))
+            .map((item) => escapeHtml(item))
+            .join(' · ')}</p>
+                      </article>
+                    `)
+      .join('')}
+                </div>
+              `
+      : ''}
             </article>
           `,
         )
         .join('')}
-      <p class="score-line">Câu đạt yêu cầu (>= 60%): <strong>${correctCount}/${items.length}</strong></p>
+      <p class="score-line">Câu đạt yêu cầu (>= ${listingThresholdPercent}%): <strong>${correctCount}/${items.length}</strong></p>
       <button type="button" class="action-btn" data-check-result="listing">Kiểm tra kết quả</button>
     </section>
   `
@@ -1336,12 +1458,23 @@ function attachExerciseEvents() {
     textarea.addEventListener('input', (event) => {
       const target = event.target
       state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
+    })
+
+    textarea.addEventListener('blur', (event) => {
+      const target = event.target
+      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
       render()
     })
   })
 
   document.querySelectorAll('textarea[data-listing-index]').forEach((textarea) => {
     textarea.addEventListener('input', (event) => {
+      const target = event.target
+      state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
+      state.listingChecked = false
+    })
+
+    textarea.addEventListener('blur', (event) => {
       const target = event.target
       state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
       render()

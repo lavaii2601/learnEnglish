@@ -682,6 +682,31 @@ textarea {
   background: #f7fafe;
 }
 
+.listing-review-block {
+  margin-top: 4px;
+  display: grid;
+  gap: 8px;
+}
+
+.listing-review-item {
+  border: 2px solid #c4cdda;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  display: grid;
+  gap: 4px;
+}
+
+.listing-review-item.ok {
+  border-color: #2c9a49;
+  background: #edf9f0;
+}
+
+.listing-review-item.wrong {
+  border-color: #d14646;
+  background: #fff1f1;
+}
+
 .blank-mark {
   color: var(--brand);
   font-weight: 700;
