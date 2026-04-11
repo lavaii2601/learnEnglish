@@ -42,6 +42,8 @@ const state = {
   mcqSessionPhase: 'setup',
   mcqPoolQuestions: [],
   mcqQuizQuestions: [],
+  mcqExcludeCorrectEnabled: true,
+  mcqCorrectQuestionIds: [],
   mcqCurrentIndex: 0,
   mcqNextPromptOpen: false,
   mcqReviewOpen: false,
@@ -152,8 +154,19 @@ function getMcqExerciseItems() {
   return getClientFallbackMcqItems()
 }
 
+function normalizeMcqQuestionId(value) {
+  return String(value || '').trim()
+}
+
+function getFilteredMcqPool(items) {
+  if (!state.mcqExcludeCorrectEnabled) return [...items]
+  const blockedIdSet = new Set(state.mcqCorrectQuestionIds.map((id) => normalizeMcqQuestionId(id)))
+  return items.filter((item) => !blockedIdSet.has(normalizeMcqQuestionId(item.id)))
+}
+
 function prepareMcqPool() {
-  state.mcqPoolQuestions = getMcqExerciseItems()
+  const rawPool = getMcqExerciseItems()
+  state.mcqPoolQuestions = getFilteredMcqPool(rawPool)
 }
 
 function getShuffledItems(items) {
@@ -280,9 +293,22 @@ function isMcqRoundComplete() {
 }
 
 function finishMcqSession() {
+  const correctIds = state.mcqQuizQuestions
+    .filter((item, index) => state.mcqAnswers[index] === item.answer)
+    .map((item) => normalizeMcqQuestionId(item.id))
+
+  if (correctIds.length) {
+    const merged = new Set([
+      ...state.mcqCorrectQuestionIds.map((id) => normalizeMcqQuestionId(id)),
+      ...correctIds,
+    ])
+    state.mcqCorrectQuestionIds = [...merged]
+  }
+
   state.mcqWrongQuestions = state.mcqQuizQuestions.filter((item, index) => state.mcqAnswers[index] !== item.answer)
   state.mcqSessionPhase = 'completed'
   state.mcqReviewOpen = true
+  prepareMcqPool()
 }
 
 function openResultNotice(type) {
@@ -549,6 +575,7 @@ function renderMcqPage() {
   const questions = state.mcqQuizQuestions
   const score = scoreMcq()
   const availableCount = state.mcqPoolQuestions.length
+  const hiddenCorrectCount = state.mcqCorrectQuestionIds.length
   const selectedCount = Math.min(state.mcqQuestionCount, availableCount)
   const modeLabel =
     state.mcqSourceMode === 'vocabulary'
@@ -584,6 +611,12 @@ function renderMcqPage() {
             <option value="15" ${state.mcqQuestionCount === 15 ? 'selected' : ''}>15 câu</option>
           </select>
         </label>
+        <label class="inline-check">
+          <input type="checkbox" data-mcq-exclude-correct ${state.mcqExcludeCorrectEnabled ? 'checked' : ''} />
+          <span>Không lấy câu đã làm đúng</span>
+        </label>
+        <p class="muted">Đã ghi nhận đúng: <strong>${hiddenCorrectCount}</strong> câu.</p>
+        <button type="button" class="small-btn" data-mcq-clear-correct ${hiddenCorrectCount ? '' : 'disabled'}>Hiển thị lại câu đã đúng</button>
         <p class="muted">Chế độ hiện tại: ${modeLabel}. Tối đa có thể lấy: <strong>${availableCount}</strong> câu.</p>
         <button type="button" class="action-btn" data-mcq-start ${availableCount ? '' : 'disabled'}>Bắt đầu làm bài</button>
         ${sessionCompleted
@@ -1088,6 +1121,23 @@ function attachExerciseEvents() {
   document.querySelectorAll('[data-mcq-start]').forEach((button) => {
     button.addEventListener('click', () => {
       startMcqQuizRound(false)
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-mcq-exclude-correct]').forEach((checkbox) => {
+    checkbox.addEventListener('change', (event) => {
+      const target = event.target
+      state.mcqExcludeCorrectEnabled = Boolean(target.checked)
+      prepareMcqPool()
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-mcq-clear-correct]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.mcqCorrectQuestionIds = []
+      prepareMcqPool()
       render()
     })
   })

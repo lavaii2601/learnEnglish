@@ -448,6 +448,18 @@ p {
   flex-wrap: wrap;
 }
 
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.inline-check input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+}
+
 .review-grid {
   gap: 8px;
 }
