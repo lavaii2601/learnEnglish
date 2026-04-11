@@ -9,11 +9,29 @@ const PORT = Number(process.env.PORT || 3001)
 app.use(cors())
 app.use(express.json())
 
+function normalizePathFromRequestUrl(rawUrl) {
+  const raw = String(rawUrl || '/').trim()
+  if (!raw) return '/'
+
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    try {
+      const parsed = new URL(raw)
+      return `${parsed.pathname || '/'}${parsed.search || ''}`
+    } catch {
+      return '/'
+    }
+  }
+
+  return raw
+}
+
 // Vercel can forward requests as /resource instead of /api/resource in some setups.
 app.use((req, _, next) => {
-  const currentUrl = String(req.url || '/').trim()
+  const currentUrl = normalizePathFromRequestUrl(req.url)
   if (!currentUrl.startsWith('/api')) {
     req.url = `/api${currentUrl.startsWith('/') ? '' : '/'}${currentUrl}`
+  } else {
+    req.url = currentUrl
   }
   next()
 })
