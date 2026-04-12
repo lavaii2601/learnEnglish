@@ -169,12 +169,37 @@ function answerProfile(answer) {
   }
 }
 
+function answersShareShape(targetAnswer, candidateAnswer) {
+  const target = answerProfile(targetAnswer)
+  const candidate = answerProfile(candidateAnswer)
+
+  return target.isSingleWord === candidate.isSingleWord
+    && target.isSentenceLike === candidate.isSentenceLike
+}
+
 function questionHints(question) {
   const text = normalizeForCompare(question)
   return {
+    isVocabularyDefinition: text.includes('nghĩa của từ') || text.includes('nghia cua tu') || text.includes('meaning of the word'),
     wantsGrammar: text.includes('ngữ pháp') || text.includes('grammar'),
     wantsSynonym: text.includes('đồng nghĩa') || text.includes('synonym'),
   }
+}
+
+function questionFamily(question, answer) {
+  const hints = questionHints(question)
+  const answerShape = answerProfile(answer)
+
+  if (hints.isVocabularyDefinition) return 'vocabulary_definition'
+  if (hints.wantsGrammar) return 'grammar_sentence'
+  if (hints.wantsSynonym) return 'synonym_word'
+  if (answerShape.isSentenceLike) return 'sentence_like'
+  if (answerShape.isSingleWord) return 'single_word'
+  return 'general'
+}
+
+function sharesQuestionFamily(targetQuestion, targetAnswer, candidateQuestion, candidateAnswer) {
+  return questionFamily(targetQuestion, targetAnswer) === questionFamily(candidateQuestion, candidateAnswer)
 }
 
 function distractorScore(targetAnswer, targetQuestion, candidateAnswer, candidateQuestion) {
@@ -214,7 +239,20 @@ function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
       .map((row) => [normalizeForCompare(row.answer), row]),
   ).values()]
 
-  const scoredCandidates = uniqueCandidates
+  const sameFamilyCandidates = uniqueCandidates.filter((row) => sharesQuestionFamily(
+    currentQuestion,
+    currentAnswer,
+    row.question,
+    row.answer,
+  ))
+  const sameShapeCandidates = uniqueCandidates.filter((row) => answersShareShape(currentAnswer, row.answer))
+  const candidatePool = sameFamilyCandidates.length
+    ? sameFamilyCandidates
+    : sameShapeCandidates.length
+      ? sameShapeCandidates
+      : uniqueCandidates
+
+  const scoredCandidates = candidatePool
     .map((row) => ({
       answer: row.answer,
       score: distractorScore(currentAnswer, currentQuestion, row.answer, row.question),
@@ -427,14 +465,10 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
   const writingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) !== 'listing')
   const listingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'listing')
 
-  const vocabularyDefinitions = vocabularyRows
-    .map((row) => String(row.definition || '').trim())
-    .filter(Boolean)
-
-  const allMcqAnswerRows = mcqRows
+  const vocabularyAnswerRows = vocabularyRows
     .map((row) => ({
-      answer: String(row.answer || '').trim(),
-      question: String(row.question || '').trim(),
+      answer: String(row.definition || '').trim(),
+      question: `Nghĩa của từ "${row.word}" là gì?`,
     }))
     .filter((row) => row.answer)
 
@@ -446,33 +480,54 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     source: 'vocabulary',
   }))
 
-  const questionMcqRows = mcqRows.map((row) => ({
-    id: row.id,
-    question: row.question,
-    answer: row.answer,
-    mode: toMcqMode(row.mode),
-    source: 'question',
-  }))
-
-  let mcqExerciseRows = []
-  if (mcqSourceMode === 'vocabulary') {
-    mcqExerciseRows = vocabularyMcqRows
-  }
-  if (mcqSourceMode === 'question') {
-    mcqExerciseRows = questionMcqRows
-  }
-  if (mcqSourceMode === 'mix') {
-    mcqExerciseRows = [...questionMcqRows, ...vocabularyMcqRows]
-  }
-
-  mcqExerciseRows = shuffleList(mcqExerciseRows)
-
-  const combinedAnswerRows = mcqExerciseRows
+  const vocabularyMcqAnswerRows = mcqRows
+    .filter((row) => toMcqMode(row.mode) === 'vocabulary_definition')
     .map((row) => ({
       answer: String(row.answer || '').trim(),
       question: String(row.question || '').trim(),
     }))
     .filter((row) => row.answer)
+
+  const questionMcqRows = mcqRows
+    .filter((row) => toMcqMode(row.mode) !== 'vocabulary_definition')
+    .map((row) => ({
+      id: row.id,
+      question: row.question,
+      answer: row.answer,
+      mode: 'general',
+      source: 'question',
+    }))
+
+  const questionMcqAnswerRows = questionMcqRows.map((row) => ({
+    answer: String(row.answer || '').trim(),
+    question: String(row.question || '').trim(),
+  }))
+
+  const mcqVocabularyRows = [
+    ...vocabularyMcqRows,
+    ...mcqRows
+      .filter((row) => toMcqMode(row.mode) === 'vocabulary_definition')
+      .map((row) => ({
+        id: row.id,
+        question: row.question,
+        answer: String(row.answer || '').trim(),
+        mode: 'vocabulary_definition',
+        source: 'vocabulary',
+      })),
+  ]
+
+  const mcqQuestionRows = questionMcqRows
+
+  const mcqExerciseRows = mcqSourceMode === 'vocabulary'
+    ? mcqVocabularyRows
+    : mcqSourceMode === 'question'
+      ? mcqQuestionRows
+      : [...mcqQuestionRows, ...mcqVocabularyRows]
+
+  const shuffledMcqExerciseRows = shuffleList(mcqExerciseRows)
+
+  const vocabularyExerciseAnswerRows = [...vocabularyAnswerRows, ...vocabularyMcqAnswerRows]
+  const questionExerciseAnswerRows = questionMcqAnswerRows
 
   return {
     vocabulary: vocabularyRows,
@@ -483,23 +538,19 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         mode: toMcqMode(row.mode),
         options:
           toMcqMode(row.mode) === 'vocabulary_definition'
-            ? createMcqOptions(row.answer, vocabularyDefinitions.map((answer) => ({ answer, question: '' })), row.question)
-            : createMcqOptions(row.answer, allMcqAnswerRows, row.question),
+            ? createMcqOptions(row.answer, vocabularyExerciseAnswerRows, row.question)
+            : createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
         answer: row.answer,
       })),
-      mcqExercise: mcqExerciseRows.map((row) => ({
+      mcqExercise: shuffledMcqExerciseRows.map((row) => ({
         id: row.id,
         question: row.question,
         mode: row.mode,
         source: row.source,
         options:
           row.mode === 'vocabulary_definition'
-            ? createMcqOptions(
-              row.answer,
-              vocabularyDefinitions.map((answer) => ({ answer, question: '' })),
-              row.question,
-            )
-            : createMcqOptions(row.answer, combinedAnswerRows, row.question),
+            ? createMcqOptions(row.answer, vocabularyExerciseAnswerRows, row.question)
+            : createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
         answer: row.answer,
       })),
       matching: matchingRows,

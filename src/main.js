@@ -200,23 +200,62 @@ function setRoute(route) {
   window.location.hash = `#${route}`
 }
 
-function buildFallbackOptions(correctAnswer, pool) {
+function buildFallbackOptions(correctAnswer, question, pool) {
   const uniquePool = [...new Set(pool.filter((item) => item && item !== correctAnswer))]
-  const distractors = getShuffledItems(uniquePool).slice(0, 3)
+  const correctFamily = getMcqFamily(question, correctAnswer)
+  const sameFamilyPool = uniquePool.filter((item) => getMcqFamily(question, item) === correctFamily)
+  const correctProfile = getAnswerProfile(correctAnswer)
+  const sameShapePool = uniquePool.filter((item) => answersShareShape(correctProfile, getAnswerProfile(item)))
+  const candidatePool = sameFamilyPool.length ? sameFamilyPool : sameShapePool.length ? sameShapePool : uniquePool
+  const distractors = getShuffledItems(candidatePool).slice(0, 3)
   while (distractors.length < 3) {
     distractors.push(`Phương án nhiễu ${distractors.length + 1}`)
   }
   return getShuffledItems([correctAnswer, ...distractors])
 }
 
+function getAnswerProfile(answer) {
+  const value = normalizeText(answer)
+  const words = value.split(/\s+/).filter(Boolean)
+
+  return {
+    isSingleWord: words.length === 1,
+    isSentenceLike: /[.!?]$/.test(value) || words.length >= 5,
+  }
+}
+
+function answersShareShape(targetProfile, candidateProfile) {
+  return targetProfile.isSingleWord === candidateProfile.isSingleWord
+    && targetProfile.isSentenceLike === candidateProfile.isSentenceLike
+}
+
+function getMcqFamily(question, answer) {
+  const normalizedQuestion = normalizeText(question)
+  const answerProfile = getAnswerProfile(answer)
+
+  if (normalizedQuestion.includes('nghĩa của từ') || normalizedQuestion.includes('nghia cua tu') || normalizedQuestion.includes('meaning of the word')) {
+    return 'vocabulary_definition'
+  }
+  if (normalizedQuestion.includes('ngữ pháp') || normalizedQuestion.includes('grammar')) {
+    return 'grammar_sentence'
+  }
+  if (normalizedQuestion.includes('đồng nghĩa') || normalizedQuestion.includes('synonym')) {
+    return 'synonym_word'
+  }
+  if (answerProfile.isSentenceLike) return 'sentence_like'
+  if (answerProfile.isSingleWord) return 'single_word'
+  return 'general'
+}
+
 function getClientFallbackMcqItems() {
-  const vocabItems = state.database.vocabulary
+  const vocabularyItems = state.database.vocabulary
     .filter((item) => String(item.definition || '').trim())
     .map((item) => ({
       id: `fallback-vocab-${item.id}`,
       question: `Nghĩa của từ "${item.word}" là gì?`,
       answer: String(item.definition || '').trim(),
       source: 'vocabulary',
+      mode: 'vocabulary_definition',
     }))
 
   const questionItems = (state.database.questions.mcq || [])
@@ -225,21 +264,42 @@ function getClientFallbackMcqItems() {
       id: `fallback-question-${item.id}`,
       question: item.question,
       answer: item.answer,
-      source: 'question',
+      source: item.mode === 'vocabulary_definition' ? 'vocabulary' : 'question',
+      mode: item.mode || 'general',
     }))
 
   let selectedItems = []
-  if (state.mcqSourceMode === 'vocabulary') selectedItems = vocabItems
-  if (state.mcqSourceMode === 'question') selectedItems = questionItems
-  if (state.mcqSourceMode === 'mix') selectedItems = [...questionItems, ...vocabItems]
+  if (state.mcqSourceMode === 'vocabulary') {
+    selectedItems = [...vocabularyItems, ...questionItems.filter((item) => item.source === 'vocabulary')]
+  }
+  if (state.mcqSourceMode === 'question') {
+    selectedItems = questionItems.filter((item) => item.source === 'question')
+  }
+  if (state.mcqSourceMode === 'mix') {
+    selectedItems = [
+      ...questionItems.filter((item) => item.source === 'question'),
+      ...vocabularyItems,
+      ...questionItems.filter((item) => item.source === 'vocabulary'),
+    ]
+  }
 
-  const answerPool = selectedItems.map((item) => item.answer)
+  const vocabularyAnswerPool = [
+    ...vocabularyItems.map((item) => item.answer),
+    ...questionItems.filter((item) => item.source === 'vocabulary').map((item) => item.answer),
+  ]
+  const questionAnswerPool = questionItems
+    .filter((item) => item.source === 'question')
+    .map((item) => item.answer)
+
+  const getPoolForItem = (item) => (item.source === 'vocabulary' ? vocabularyAnswerPool : questionAnswerPool)
 
   return getShuffledItems(selectedItems).map((item) => ({
     id: item.id,
     question: item.question,
     answer: item.answer,
-    options: buildFallbackOptions(item.answer, answerPool),
+    mode: item.mode,
+    source: item.source,
+    options: buildFallbackOptions(item.answer, item.question, getPoolForItem(item)),
   }))
 }
 
