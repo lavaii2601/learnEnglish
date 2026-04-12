@@ -38,6 +38,7 @@ const state = {
   listingCheckedMap: [],
   slideBoardOpen: false,
   sidebarOpen: loadSidebarOpenState(),
+  sourceGroupOpen: false,
   resultNotice: null,
   serverError: '',
   loading: true,
@@ -61,6 +62,10 @@ const state = {
   writingScoreCache: [],
   listingScoreDirty: true,
   listingScoreCache: [],
+}
+
+function isSourceRoute(route) {
+  return route === '/source' || route.startsWith('/source/')
 }
 
 function cloneDatabasePayload(payload) {
@@ -668,7 +673,10 @@ function renderLayout(content) {
     '/source': 'Thêm nguồn',
     '/source/vocab': 'Thêm từ vựng',
     '/source/questions': 'Thêm câu hỏi',
+    '/source/matching': 'Thêm nối từ',
   }
+
+  const sourceGroupOpen = state.sourceGroupOpen || isSourceRoute(state.route)
 
   const questionAnswerCount = state.database.questions.mcq.length
   const vocabularyCount = state.database.vocabulary.length
@@ -719,9 +727,21 @@ function renderLayout(content) {
         <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing">Liệt kê</button>
 
         <p class="group-title">Nguồn dữ liệu</p>
-        <button class="nav-btn ${state.route === '/source' ? 'active' : ''}" data-route="/source">Trang thêm nguồn</button>
-        <button class="nav-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
-        <button class="nav-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
+        <button
+          class="nav-btn nav-group-toggle ${sourceGroupOpen ? 'active' : ''}"
+          type="button"
+          data-toggle-source-group="true"
+          aria-expanded="${sourceGroupOpen ? 'true' : 'false'}"
+        >
+          <span>Thêm nguồn</span>
+          <span class="nav-caret">${sourceGroupOpen ? '▾' : '▸'}</span>
+        </button>
+        <div class="nav-subgroup ${sourceGroupOpen ? 'open' : ''}">
+          <button class="nav-btn nav-sub-btn ${state.route === '/source' ? 'active' : ''}" data-route="/source">Trang thêm nguồn</button>
+          <button class="nav-btn nav-sub-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
+          <button class="nav-btn nav-sub-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
+          <button class="nav-btn nav-sub-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching">Nhiệm vụ: Thêm nối từ</button>
+        </div>
 
         <button
           class="slide-trigger ${state.slideBoardOpen ? 'active' : ''}"
@@ -1233,10 +1253,11 @@ function renderSourceHome() {
   return `
     <section class="page-card">
       <h2>Thêm nguồn</h2>
-      <p>Bạn có 2 nhiệm vụ riêng:</p>
+      <p>Bạn có 3 nhiệm vụ riêng:</p>
       <div class="action-grid">
         <button class="action-btn" data-route="/source/vocab">Nhiệm vụ 1: Thêm từ vựng</button>
         <button class="action-btn" data-route="/source/questions">Nhiệm vụ 2: Thêm câu hỏi + câu trả lời</button>
+        <button class="action-btn" data-route="/source/matching">Nhiệm vụ 3: Thêm nối từ</button>
       </div>
       <h3>Từ vựng gần đây</h3>
       <ul class="list-view">
@@ -1245,6 +1266,46 @@ function renderSourceHome() {
           .map((item) => `<li><strong>${escapeHtml(item.word)}:</strong> ${escapeHtml(item.definition)}</li>`)
           .join('')}
       </ul>
+    </section>
+  `
+}
+
+function renderSourceMatching() {
+  const matchingList = state.database.questions.matching || []
+
+  return `
+    <section class="page-card">
+      <h2>Nhiệm vụ: Thêm nối từ</h2>
+      <form id="matching-form" class="stack-form">
+        <p class="muted">Thêm cặp từ và nghĩa để dùng cho bài tập nối từ.</p>
+        <label>Từ tiếng Anh<input name="word" required placeholder="diligent" /></label>
+        <label>Nghĩa tiếng Anh<input name="meaning" required placeholder="hard-working and careful" /></label>
+        <button type="submit">Lưu cặp nối từ vào cơ sở dữ liệu</button>
+      </form>
+
+      <h3>Quản lý nối từ (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${matchingList.length
+          ? matchingList
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <strong>${escapeHtml(item.word)}</strong>
+                    <p>${escapeHtml(item.meaning)}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button class="small-btn" data-edit-source-matching="${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-source-matching="${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có cặp nối từ nào.</p>'}
+      </div>
+
+      ${renderSourceMessage()}
     </section>
   `
 }
@@ -1471,6 +1532,7 @@ function renderCurrentPage() {
   if (state.route === '/source') return renderLayout(renderSourceHome())
   if (state.route === '/source/vocab') return renderLayout(renderSourceVocab())
   if (state.route === '/source/questions') return renderLayout(renderSourceQuestion())
+  if (state.route === '/source/matching') return renderLayout(renderSourceMatching())
   return renderLandingPage()
 }
 
@@ -1508,6 +1570,13 @@ function attachNavEvents() {
       }
 
       state.slideBoardOpen = !state.slideBoardOpen
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-toggle-source-group]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.sourceGroupOpen = !state.sourceGroupOpen
       render()
     })
   })
@@ -1814,6 +1883,65 @@ function attachSourceEvents() {
           })
         },
         'Đã cập nhật từ vựng.',
+      )
+    })
+  })
+
+  const matchingForm = document.querySelector('#matching-form')
+  if (matchingForm) {
+    matchingForm.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const formData = new FormData(matchingForm)
+
+      withRefresh(
+        async () => {
+          await createQuestion({
+            type: 'matching',
+            word: String(formData.get('word') || '').trim(),
+            meaning: String(formData.get('meaning') || '').trim(),
+          })
+          matchingForm.reset()
+        },
+        'Đã thêm cặp nối từ vào cơ sở dữ liệu.',
+      )
+    })
+  }
+
+  document.querySelectorAll('[data-delete-source-matching]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.deleteSourceMatching)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion('matching', id)
+        },
+        'Đã xóa cặp nối từ.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-edit-source-matching]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.editSourceMatching)
+      if (!id) return
+
+      const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      const word = window.prompt('Từ tiếng Anh', item.word)
+      if (word === null) return
+      const meaning = window.prompt('Nghĩa tiếng Anh', item.meaning)
+      if (meaning === null) return
+
+      withRefresh(
+        async () => {
+          await updateQuestion('matching', id, {
+            word: word.trim(),
+            meaning: meaning.trim(),
+          })
+        },
+        'Đã cập nhật cặp nối từ.',
       )
     })
   })
