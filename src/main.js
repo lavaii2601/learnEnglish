@@ -206,11 +206,9 @@ function buildFallbackOptions(correctAnswer, question, pool) {
   const sameFamilyPool = uniquePool.filter((item) => getMcqFamily(question, item) === correctFamily)
   const correctProfile = getAnswerProfile(correctAnswer)
   const sameShapePool = uniquePool.filter((item) => answersShareShape(correctProfile, getAnswerProfile(item)))
-  const candidatePool = sameFamilyPool.length ? sameFamilyPool : sameShapePool.length ? sameShapePool : uniquePool
+  const candidatePool = [...sameFamilyPool, ...sameShapePool, ...uniquePool]
+    .filter((item, index, items) => index === items.findIndex((candidate) => candidate === item))
   const distractors = getShuffledItems(candidatePool).slice(0, 3)
-  while (distractors.length < 3) {
-    distractors.push(`Phương án nhiễu ${distractors.length + 1}`)
-  }
   return getShuffledItems([correctAnswer, ...distractors])
 }
 

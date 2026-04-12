@@ -246,11 +246,8 @@ function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
     row.answer,
   ))
   const sameShapeCandidates = uniqueCandidates.filter((row) => answersShareShape(currentAnswer, row.answer))
-  const candidatePool = sameFamilyCandidates.length
-    ? sameFamilyCandidates
-    : sameShapeCandidates.length
-      ? sameShapeCandidates
-      : uniqueCandidates
+  const candidatePool = [...sameFamilyCandidates, ...sameShapeCandidates, ...uniqueCandidates]
+    .filter((row, index, items) => index === items.findIndex((candidate) => normalizeForCompare(candidate.answer) === normalizeForCompare(row.answer)))
 
   const scoredCandidates = candidatePool
     .map((row) => ({
@@ -263,10 +260,6 @@ function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
   const pickedDistractors = shuffleList(shortlist)
     .slice(0, 3)
     .map((item) => item.answer)
-
-  while (pickedDistractors.length < 3) {
-    pickedDistractors.push(`Phương án nhiễu ${pickedDistractors.length + 1}`)
-  }
 
   return shuffleList([currentAnswer, ...pickedDistractors])
 }
