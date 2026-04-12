@@ -262,32 +262,26 @@ function getClientFallbackMcqItems() {
       id: `fallback-question-${item.id}`,
       question: item.question,
       answer: item.answer,
-      source: item.mode === 'vocabulary_definition' ? 'vocabulary' : 'question',
+      source: 'question',
       mode: item.mode || 'general',
     }))
 
   let selectedItems = []
   if (state.mcqSourceMode === 'vocabulary') {
-    selectedItems = [...vocabularyItems, ...questionItems.filter((item) => item.source === 'vocabulary')]
+    selectedItems = vocabularyItems
   }
   if (state.mcqSourceMode === 'question') {
-    selectedItems = questionItems.filter((item) => item.source === 'question')
+    selectedItems = questionItems
   }
   if (state.mcqSourceMode === 'mix') {
     selectedItems = [
-      ...questionItems.filter((item) => item.source === 'question'),
+      ...questionItems,
       ...vocabularyItems,
-      ...questionItems.filter((item) => item.source === 'vocabulary'),
     ]
   }
 
-  const vocabularyAnswerPool = [
-    ...vocabularyItems.map((item) => item.answer),
-    ...questionItems.filter((item) => item.source === 'vocabulary').map((item) => item.answer),
-  ]
-  const questionAnswerPool = questionItems
-    .filter((item) => item.source === 'question')
-    .map((item) => item.answer)
+  const vocabularyAnswerPool = vocabularyItems.map((item) => item.answer)
+  const questionAnswerPool = questionItems.map((item) => item.answer)
 
   const getPoolForItem = (item) => (item.source === 'vocabulary' ? vocabularyAnswerPool : questionAnswerPool)
 

@@ -473,21 +473,12 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     source: 'vocabulary',
   }))
 
-  const vocabularyMcqAnswerRows = mcqRows
-    .filter((row) => toMcqMode(row.mode) === 'vocabulary_definition')
-    .map((row) => ({
-      answer: String(row.answer || '').trim(),
-      question: String(row.question || '').trim(),
-    }))
-    .filter((row) => row.answer)
-
   const questionMcqRows = mcqRows
-    .filter((row) => toMcqMode(row.mode) !== 'vocabulary_definition')
     .map((row) => ({
       id: row.id,
       question: row.question,
       answer: row.answer,
-      mode: 'general',
+      mode: toMcqMode(row.mode),
       source: 'question',
     }))
 
@@ -496,18 +487,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     question: String(row.question || '').trim(),
   }))
 
-  const mcqVocabularyRows = [
-    ...vocabularyMcqRows,
-    ...mcqRows
-      .filter((row) => toMcqMode(row.mode) === 'vocabulary_definition')
-      .map((row) => ({
-        id: row.id,
-        question: row.question,
-        answer: String(row.answer || '').trim(),
-        mode: 'vocabulary_definition',
-        source: 'vocabulary',
-      })),
-  ]
+  const mcqVocabularyRows = vocabularyMcqRows
 
   const mcqQuestionRows = questionMcqRows
 
@@ -519,7 +499,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
 
   const shuffledMcqExerciseRows = shuffleList(mcqExerciseRows)
 
-  const vocabularyExerciseAnswerRows = [...vocabularyAnswerRows, ...vocabularyMcqAnswerRows]
+  const vocabularyExerciseAnswerRows = vocabularyAnswerRows
   const questionExerciseAnswerRows = questionMcqAnswerRows
 
   return {
@@ -529,10 +509,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         id: row.id,
         question: row.question,
         mode: toMcqMode(row.mode),
-        options:
-          toMcqMode(row.mode) === 'vocabulary_definition'
-            ? createMcqOptions(row.answer, vocabularyExerciseAnswerRows, row.question)
-            : createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
+        options: createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
         answer: row.answer,
       })),
       mcqExercise: shuffledMcqExerciseRows.map((row) => ({
@@ -541,7 +518,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         mode: row.mode,
         source: row.source,
         options:
-          row.mode === 'vocabulary_definition'
+          row.source === 'vocabulary'
             ? createMcqOptions(row.answer, vocabularyExerciseAnswerRows, row.question)
             : createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
         answer: row.answer,
