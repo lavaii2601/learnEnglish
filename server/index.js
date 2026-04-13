@@ -673,6 +673,23 @@ app.post('/api/questions', async (req, res, next) => {
       assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
     }
 
+    if (type === 'matching') {
+      const word = String(req.body.word || '').trim()
+      const meaning = String(req.body.meaning || '').trim()
+
+      if (!word || !meaning) {
+        return res.status(400).json({ message: 'Dữ liệu bài nối từ không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('matching_questions').insert([
+        {
+          word,
+          meaning,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi nối từ')
+    }
+
     if (type === 'writing') {
       const word = String(req.body.word || '').trim()
       const hint = String(req.body.hint || '').trim()
