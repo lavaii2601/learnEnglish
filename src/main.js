@@ -13,7 +13,7 @@ const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
 const DATABASE_CACHE_TTL_MS = 30_000
 const LISTING_MATCH_THRESHOLD = 0.7
-const ENCOURAGEMENT_IMAGES = Array.from({ length: 10 }, (_, index) => `/picture/${index + 1}.jpg`)
+const ENCOURAGEMENT_IMAGES = Array.from({ length: 15 }, (_, index) => `/picture/${index + 1}.jpg`)
 const ENCOURAGEMENT_TEXTS = [
   'Bạn làm rất tốt, tiếp tục phát huy nhé!',
   'Tuyệt vời, mỗi lần luyện là một lần tiến bộ.',
