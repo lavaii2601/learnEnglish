@@ -49,6 +49,7 @@ const state = {
   listingSessionIndexes: [],
   listingCurrentIndex: 0,
   listingCheckedMap: [],
+  listingShowAnswerMap: [],
   slideBoardOpen: false,
   sidebarOpen: loadSidebarOpenState(),
   sourceGroupOpen: false,
@@ -350,6 +351,7 @@ function resetListingSession(totalQuestions) {
   state.listingSessionIndexes = buildListingSessionIndexes(totalQuestions)
   state.listingCurrentIndex = state.listingSessionIndexes[0] || 0
   state.listingCheckedMap = Array(totalQuestions).fill(false)
+  state.listingShowAnswerMap = Array(totalQuestions).fill(false)
 }
 
 function resetMatchingSession(totalQuestions = (state.database.questions.matching || []).length) {
@@ -1582,14 +1584,18 @@ function renderWritingPage() {
 function renderListingPage() {
   const items = state.database.questions.listing || []
   const scores = scoreListing()
+  const preparedItems = getListingPreparedItems()
   const sessionIndexes = state.listingSessionIndexes || []
   const correctCount = getListingCorrectCount(scores, sessionIndexes)
   const totalCount = sessionIndexes.length
   const currentIndex = Math.max(0, Math.min(state.listingCurrentIndex, Math.max(totalCount - 1, 0)))
   const activeQuestionIndex = sessionIndexes[currentIndex] ?? 0
   const currentItem = items[activeQuestionIndex]
+  const currentPreparedItem = preparedItems[activeQuestionIndex] || { expectedEntries: [] }
+  const currentExpectedEntries = currentPreparedItem.expectedEntries || []
   const currentScore = scores[activeQuestionIndex] || { percent: 0, hitCount: 0, total: 0, ideaDetails: [] }
   const currentChecked = Boolean(state.listingCheckedMap[activeQuestionIndex])
+  const currentShowAnswer = Boolean(state.listingShowAnswerMap[activeQuestionIndex])
   const checkedCount = sessionIndexes.filter((index) => state.listingCheckedMap[index]).length
   const allChecked = totalCount > 0 && checkedCount === totalCount
   const maxSelectable = Math.min(5, Math.max(1, items.length || 1))
@@ -1620,7 +1626,7 @@ function renderListingPage() {
                 <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
               </h3>
               <p class="question-hint">${escapeHtml(currentItem.hint || 'Liệt kê các ý theo từng dòng.')}</p>
-              <p class="muted">Mỗi dòng là 1 ý. Hệ thống sẽ chấm đúng theo số ý bạn nhập, không dùng % khớp theo dòng.</p>
+              <p class="muted">Mỗi dòng là 1 ý. Hệ thống sẽ chấm đúng theo số ý bạn nhập, không dùng % khớp theo dòng. Bấm "Xem kết quả" để hiện đáp án đúng ngay tại đây.</p>
               <textarea data-listing-index="${activeQuestionIndex}" rows="6" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.listingAnswers[activeQuestionIndex] || '')}</textarea>
               <p class="muted">Đã khớp: <strong>${currentScore.hitCount}/${currentScore.total}</strong> ý</p>
               ${currentChecked
@@ -1639,10 +1645,26 @@ function renderListingPage() {
                 </div>
               `
       : ''}
+              ${currentShowAnswer
+      ? `
+                <div class="listing-review-block">
+                  <p class="muted"><strong>Đáp án đúng:</strong></p>
+                  ${currentExpectedEntries.length
+        ? currentExpectedEntries
+          .map((entry, index) => `
+                        <article class="listing-review-item ok">
+                          <p><strong>Ý ${index + 1}:</strong> ${escapeHtml(entry.raw)}</p>
+                        </article>
+                      `)
+          .join('')
+        : '<article class="listing-review-item"><p>Chưa có đáp án mẫu cho câu này.</p></article>'}
+                </div>
+              `
+      : ''}
             </article>
             <div class="mcq-complete-actions">
               ${currentChecked ? (!sessionComplete ? '<button type="button" class="action-btn" data-listing-next-question>Qua câu ngẫu nhiên tiếp theo</button>' : '') : '<button type="button" class="action-btn" data-listing-check-current>Kiểm tra câu hiện tại</button>'}
-              <button type="button" class="small-btn" data-check-result="listing">Xem kết quả</button>
+              <button type="button" class="small-btn" data-listing-show-answer>Xem kết quả</button>
             </div>
           `
       : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
@@ -2042,6 +2064,7 @@ function attachExerciseEvents() {
       const index = Number(target.dataset.listingIndex)
       state.listingAnswers[index] = target.value
       state.listingCheckedMap[index] = false
+      state.listingShowAnswerMap[index] = false
       state.listingScoreDirty = true
     }
   })
@@ -2114,6 +2137,13 @@ function attachExerciseEvents() {
     if (button?.matches('[data-listing-check-current]')) {
       const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
       state.listingCheckedMap[activeIndex] = true
+      render()
+      return
+    }
+
+    if (button?.matches('[data-listing-show-answer]')) {
+      const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
+      state.listingShowAnswerMap[activeIndex] = true
       render()
       return
     }
@@ -2477,23 +2507,13 @@ function attachSourceEvents() {
       const item = state.database.vocabulary.find((entry) => entry.id === id)
       if (!item) return
 
-      const word = window.prompt('Từ', item.word)
-      if (word === null) return
-      const definition = window.prompt('Định nghĩa', item.definition)
-      if (definition === null) return
-      const example = window.prompt('Ví dụ', item.example || '')
-      if (example === null) return
-
-      withRefresh(
-        async () => {
-          await updateVocabulary(id, {
-            word: word.trim(),
-            definition: definition.trim(),
-            example: example.trim(),
-          })
-        },
-        'Đã cập nhật từ vựng.',
-      )
+      openEditDialog({
+        kind: 'vocab',
+        id,
+        word: item.word,
+        definition: item.definition,
+        example: item.example || '',
+      })
     })
   })
 
@@ -2539,20 +2559,12 @@ function attachSourceEvents() {
       const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
       if (!item) return
 
-      const word = window.prompt('Từ cột A', item.word)
-      if (word === null) return
-      const meaning = window.prompt('Từ cột B', item.meaning)
-      if (meaning === null) return
-
-      withRefresh(
-        async () => {
-          await updateQuestion('matching', id, {
-            word: word.trim(),
-            meaning: meaning.trim(),
-          })
-        },
-        'Đã cập nhật từ nối.',
-      )
+      openEditDialog({
+        kind: 'matching',
+        id,
+        word: item.word,
+        meaning: item.meaning,
+      })
     })
   })
 
@@ -2636,21 +2648,12 @@ function attachSourceEvents() {
       const item = (state.database.questions.mcq || []).find((entry) => entry.id === id)
       if (!item) return
 
-      const question = window.prompt('Câu hỏi', item.question)
-      if (question === null) return
-      const answer = window.prompt('Đáp án đúng', item.answer)
-      if (answer === null) return
-
-      withRefresh(
-        async () => {
-          await updateQuestion('mcq', id, {
-            mode: 'general',
-            question: question.trim(),
-            answer: answer.trim(),
-          })
-        },
-        'Đã cập nhật câu hỏi/câu trả lời.',
-      )
+      openEditDialog({
+        kind: 'mcq',
+        id,
+        question: item.question,
+        answer: item.answer,
+      })
     })
   })
 
@@ -2683,45 +2686,26 @@ function attachSourceEvents() {
       const item = sourceList.find((entry) => entry.id === id)
       if (!item) return
 
-      const currentPrompt = questionType === 'writing' ? item.word : item.prompt
-      const currentAnswers = questionType === 'writing' ? item.keywords : item.answers
-
-      const prompt = window.prompt('Nội dung câu hỏi / từ cần định nghĩa', currentPrompt)
-      if (prompt === null) return
-      const hint = window.prompt('Gợi ý', item.hint || '')
-      if (hint === null) return
-      const answersText = window.prompt(
-        'Đáp án mẫu theo dòng (mỗi dòng 1 đáp án)',
-        (currentAnswers || []).join('\n'),
-      )
-      if (answersText === null) return
-
-      const answers = parseWritingSampleLines(answersText)
-      if (!answers.length) {
-        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê dùng chung.'
-        state.sourceMessageType = 'error'
-        render()
+      if (questionType === 'writing') {
+        openEditDialog({
+          kind: 'writing',
+          questionType: 'writing',
+          id,
+          word: item.word,
+          hint: item.hint || '',
+          keywords: Array.isArray(item.keywords) ? item.keywords : [],
+        })
         return
       }
 
-      withRefresh(
-        async () => {
-          if (questionType === 'writing') {
-            await updateQuestion('writing', id, {
-              word: prompt.trim(),
-              hint: hint.trim(),
-              keywords: answers,
-            })
-          } else {
-            await updateQuestion('listing', id, {
-              prompt: prompt.trim(),
-              hint: hint.trim(),
-              answers,
-            })
-          }
-        },
-        'Đã cập nhật câu hỏi liệt kê dùng chung.',
-      )
+      openEditDialog({
+        kind: 'listing',
+        questionType: 'listing',
+        id,
+        prompt: item.prompt,
+        hint: item.hint || '',
+        answers: Array.isArray(item.answers) ? item.answers : [],
+      })
     })
   })
 }
