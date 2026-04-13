@@ -12,6 +12,15 @@ import {
 const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
 const DATABASE_CACHE_TTL_MS = 30_000
+const LISTING_MATCH_THRESHOLD = 0.7
+const ENCOURAGEMENT_IMAGES = Array.from({ length: 15 }, (_, index) => `/picture/${index + 1}.jpg`)
+const ENCOURAGEMENT_TEXTS = [
+  'Bạn làm rất tốt, tiếp tục phát huy nhé!',
+  'Tuyệt vời, mỗi lần luyện là một lần tiến bộ.',
+  'Cố lên, bạn đang đi đúng hướng rồi.',
+  'Rất ổn, giữ nhịp học đều là thắng lớn.',
+  'Bạn đang tiến bộ từng ngày, quá tuyệt!',
+]
 
 function loadSidebarOpenState() {
   const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY)
@@ -24,15 +33,30 @@ const state = {
   route: getRoute(),
   database: {
     vocabulary: [],
-    questions: { mcq: [], matching: [], fillBlank: [], writing: [] },
+    questions: { mcq: [], matching: [], fillBlank: [], writing: [], listing: [] },
   },
   mcqAnswers: [],
-  matchAnswers: {},
+  matchingQuestionCount: 5,
+  matchingSessionIds: [],
+  matchingRightColumnIds: [],
+  matchingPairs: {},
+  matchingSelectedLeftId: null,
+  matchingChecked: false,
+  matchingSessionPhase: 'setup',
   blankAnswers: [],
   writingAnswers: [],
+  listingAnswers: [],
+  listingQuestionCount: 5,
+  listingSessionIndexes: [],
+  listingCurrentIndex: 0,
+  listingCheckedMap: [],
   slideBoardOpen: false,
   sidebarOpen: loadSidebarOpenState(),
+  sourceGroupOpen: false,
   resultNotice: null,
+  encouragementImageUrl: '',
+  encouragementText: '',
+  lastEncouragementIndex: -1,
   serverError: '',
   loading: true,
   sourceMessage: '',
@@ -49,6 +73,20 @@ const state = {
   mcqReviewOpen: false,
   mcqWrongQuestions: [],
   databaseCache: {},
+  listingPreparedDirty: true,
+  listingPreparedCacheItems: [],
+  writingScoreDirty: true,
+  writingScoreCache: [],
+  listingScoreDirty: true,
+  listingScoreCache: [],
+}
+
+let renderScheduled = false
+let exerciseEventsBound = false
+let matchingLinesRenderScheduled = false
+
+function isSourceRoute(route) {
+  return route.startsWith('/source/')
 }
 
 function cloneDatabasePayload(payload) {
@@ -86,6 +124,90 @@ function normalizeText(text) {
   return text.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+function cleanListLine(text) {
+  return String(text || '')
+    .replace(/^\s*(?:[-*•]|\d+[.)-])\s*/, '')
+    .replace(/[;,.!?]+$/g, '')
+    .trim()
+}
+
+function normalizeListLine(text) {
+  return normalizeText(cleanListLine(text))
+}
+
+function parseAnswerLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => normalizeListLine(line))
+    .filter(Boolean)
+}
+
+function parseWritingSampleLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => cleanListLine(line))
+    .filter(Boolean)
+}
+
+function tokenizeWords(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((word) => word.trim())
+    .filter(Boolean)
+}
+
+function getListingPreparedItems() {
+  const list = state.database.questions.listing || []
+  if (!state.listingPreparedDirty) {
+    return state.listingPreparedCacheItems
+  }
+
+  const preparedItems = list.map((item) => {
+    const expectedEntries = (Array.isArray(item.answers) ? item.answers : [])
+      .map((line) => cleanListLine(line))
+      .filter(Boolean)
+      .map((line) => ({
+        raw: line,
+        normalized: normalizeListLine(line),
+        words: tokenizeWords(normalizeListLine(line)),
+      }))
+
+    return {
+      ...item,
+      expectedEntries,
+    }
+  })
+
+  state.listingPreparedCacheItems = preparedItems
+  state.listingPreparedDirty = false
+  return preparedItems
+}
+
+function getWordMatchDetail(expectedWords, userWords) {
+  const expectedUnique = [...new Set(expectedWords)]
+  const userWordSet = new Set(userWords)
+  const words = expectedUnique.map((word) => ({
+    word,
+    matched: userWordSet.has(word),
+  }))
+  const matchedCount = words.filter((item) => item.matched).length
+  const ratio = expectedUnique.length ? matchedCount / expectedUnique.length : 0
+
+  return {
+    words,
+    matchedCount,
+    totalWords: expectedUnique.length,
+    ratio,
+  }
+}
+
+function linesMatch(userLine, expectedLine) {
+  if (!userLine || !expectedLine) return false
+  if (userLine === expectedLine) return true
+  return userLine.includes(expectedLine) || expectedLine.includes(userLine)
+}
+
 function escapeHtml(value) {
   return value
     .replaceAll('&', '&amp;')
@@ -97,30 +219,69 @@ function escapeHtml(value) {
 
 function getRoute() {
   const hash = window.location.hash || '#/home'
-  return hash.replace('#', '')
+  const route = hash.replace('#', '')
+  if (route === '/source') return '/source/vocab'
+  return route
 }
 
 function setRoute(route) {
   window.location.hash = `#${route}`
 }
 
-function buildFallbackOptions(correctAnswer, pool) {
+function buildFallbackOptions(correctAnswer, question, pool) {
   const uniquePool = [...new Set(pool.filter((item) => item && item !== correctAnswer))]
-  const distractors = getShuffledItems(uniquePool).slice(0, 3)
-  while (distractors.length < 3) {
-    distractors.push(`Phương án nhiễu ${distractors.length + 1}`)
-  }
+  const correctFamily = getMcqFamily(question, correctAnswer)
+  const sameFamilyPool = uniquePool.filter((item) => getMcqFamily(question, item) === correctFamily)
+  const correctProfile = getAnswerProfile(correctAnswer)
+  const sameShapePool = uniquePool.filter((item) => answersShareShape(correctProfile, getAnswerProfile(item)))
+  const candidatePool = [...sameFamilyPool, ...sameShapePool, ...uniquePool]
+    .filter((item, index, items) => index === items.findIndex((candidate) => candidate === item))
+  const distractors = getShuffledItems(candidatePool).slice(0, 3)
   return getShuffledItems([correctAnswer, ...distractors])
 }
 
+function getAnswerProfile(answer) {
+  const value = normalizeText(answer)
+  const words = value.split(/\s+/).filter(Boolean)
+
+  return {
+    isSingleWord: words.length === 1,
+    isSentenceLike: /[.!?]$/.test(value) || words.length >= 5,
+  }
+}
+
+function answersShareShape(targetProfile, candidateProfile) {
+  return targetProfile.isSingleWord === candidateProfile.isSingleWord
+    && targetProfile.isSentenceLike === candidateProfile.isSentenceLike
+}
+
+function getMcqFamily(question, answer) {
+  const normalizedQuestion = normalizeText(question)
+  const answerProfile = getAnswerProfile(answer)
+
+  if (normalizedQuestion.includes('nghĩa của từ') || normalizedQuestion.includes('nghia cua tu') || normalizedQuestion.includes('meaning of the word')) {
+    return 'vocabulary_definition'
+  }
+  if (normalizedQuestion.includes('ngữ pháp') || normalizedQuestion.includes('grammar')) {
+    return 'grammar_sentence'
+  }
+  if (normalizedQuestion.includes('đồng nghĩa') || normalizedQuestion.includes('synonym')) {
+    return 'synonym_word'
+  }
+  if (answerProfile.isSentenceLike) return 'sentence_like'
+  if (answerProfile.isSingleWord) return 'single_word'
+  return 'general'
+}
+
 function getClientFallbackMcqItems() {
-  const vocabItems = state.database.vocabulary
+  const vocabularyItems = state.database.vocabulary
     .filter((item) => String(item.definition || '').trim())
     .map((item) => ({
       id: `fallback-vocab-${item.id}`,
       question: `Nghĩa của từ "${item.word}" là gì?`,
       answer: String(item.definition || '').trim(),
       source: 'vocabulary',
+      mode: 'vocabulary_definition',
     }))
 
   const questionItems = (state.database.questions.mcq || [])
@@ -130,20 +291,35 @@ function getClientFallbackMcqItems() {
       question: item.question,
       answer: item.answer,
       source: 'question',
+      mode: item.mode || 'general',
     }))
 
   let selectedItems = []
-  if (state.mcqSourceMode === 'vocabulary') selectedItems = vocabItems
-  if (state.mcqSourceMode === 'question') selectedItems = questionItems
-  if (state.mcqSourceMode === 'mix') selectedItems = [...questionItems, ...vocabItems]
+  if (state.mcqSourceMode === 'vocabulary') {
+    selectedItems = vocabularyItems
+  }
+  if (state.mcqSourceMode === 'question') {
+    selectedItems = questionItems
+  }
+  if (state.mcqSourceMode === 'mix') {
+    selectedItems = [
+      ...questionItems,
+      ...vocabularyItems,
+    ]
+  }
 
-  const answerPool = selectedItems.map((item) => item.answer)
+  const vocabularyAnswerPool = vocabularyItems.map((item) => item.answer)
+  const questionAnswerPool = questionItems.map((item) => item.answer)
+
+  const getPoolForItem = (item) => (item.source === 'vocabulary' ? vocabularyAnswerPool : questionAnswerPool)
 
   return getShuffledItems(selectedItems).map((item) => ({
     id: item.id,
     question: item.question,
     answer: item.answer,
-    options: buildFallbackOptions(item.answer, answerPool),
+    mode: item.mode,
+    source: item.source,
+    options: buildFallbackOptions(item.answer, item.question, getPoolForItem(item)),
   }))
 }
 
@@ -178,6 +354,69 @@ function getShuffledItems(items) {
   return list
 }
 
+function buildListingSessionIndexes(totalQuestions) {
+  const cappedTotal = Math.max(0, Number(totalQuestions) || 0)
+  if (!cappedTotal) return []
+
+  const maxAllowed = Math.min(5, cappedTotal)
+  const selectedCount = Math.min(maxAllowed, Math.max(1, state.listingQuestionCount || 1))
+  const allIndexes = Array.from({ length: cappedTotal }, (_, index) => index)
+  return getShuffledItems(allIndexes).slice(0, selectedCount)
+}
+
+function resetListingSession(totalQuestions) {
+  state.listingSessionIndexes = buildListingSessionIndexes(totalQuestions)
+  state.listingCurrentIndex = state.listingSessionIndexes[0] || 0
+  state.listingCheckedMap = Array(totalQuestions).fill(false)
+}
+
+function resetMatchingSession(totalQuestions = (state.database.questions.matching || []).length) {
+  const cappedTotal = Math.max(0, Number(totalQuestions) || 0)
+  if (!cappedTotal) {
+    state.matchingSessionIds = []
+    state.matchingRightColumnIds = []
+    state.matchingPairs = {}
+    state.matchingSelectedLeftId = null
+    state.matchingChecked = false
+    state.matchingSessionPhase = 'setup'
+    return
+  }
+
+  const maxAllowed = Math.min(10, cappedTotal)
+  const selectedCount = Math.min(maxAllowed, Math.max(1, state.matchingQuestionCount || 1))
+  const allIds = getShuffledItems(Array.from({ length: cappedTotal }, (_, index) => state.database.questions.matching[index].id))
+  const selectedIds = allIds.slice(0, selectedCount)
+
+  state.matchingSessionIds = selectedIds
+  state.matchingRightColumnIds = getShuffledItems(selectedIds)
+  state.matchingPairs = {}
+  state.matchingSelectedLeftId = selectedIds[0] || null
+  state.matchingChecked = false
+}
+
+function clearMatchingSession() {
+  state.matchingSessionIds = []
+  state.matchingRightColumnIds = []
+  state.matchingPairs = {}
+  state.matchingSelectedLeftId = null
+  state.matchingChecked = false
+  state.matchingSessionPhase = 'setup'
+}
+
+function startMatchingSession() {
+  resetMatchingSession((state.database.questions.matching || []).length)
+  if (!state.matchingSessionIds.length) {
+    state.matchingSessionPhase = 'setup'
+    return
+  }
+  state.matchingSessionPhase = 'playing'
+}
+
+function invalidateScoreCaches() {
+  state.writingScoreDirty = true
+  state.listingScoreDirty = true
+}
+
 function pickMixedQuizItems(pool, maxCount) {
   if (!Array.isArray(pool) || maxCount <= 0) return []
 
@@ -206,15 +445,36 @@ function pickMixedQuizItems(pool, maxCount) {
   return getShuffledItems(picked)
 }
 
-function startMcqQuizRound(useWrongOnly = false) {
-  const source = useWrongOnly && state.mcqWrongQuestions?.length
-    ? state.mcqWrongQuestions
+function getMcqItemKey(item) {
+  const id = normalizeMcqQuestionId(item?.id)
+  if (id) return `id:${id}`
+  return `qa:${normalizeText(item?.question || '')}::${normalizeText(item?.answer || '')}`
+}
+
+function startMcqQuizRound(options = {}) {
+  const {
+    useWrongOnly = false,
+    appendWrongQuestions = false,
+    wrongQuestions = state.mcqWrongQuestions,
+  } = options
+
+  const wrongList = Array.isArray(wrongQuestions) ? wrongQuestions : []
+  const basePool = useWrongOnly && wrongList.length
+    ? wrongList
     : state.mcqPoolQuestions
-  const pool = Array.isArray(source) ? source : []
+  const pool = Array.isArray(basePool) ? basePool : []
   const maxCount = Math.min(state.mcqQuestionCount || 5, pool.length)
-  const quizItems = state.mcqSourceMode === 'mix'
+  const baseQuizItems = state.mcqSourceMode === 'mix'
     ? pickMixedQuizItems(pool, maxCount)
     : getShuffledItems(pool).slice(0, maxCount)
+  const baseKeySet = new Set(baseQuizItems.map((entry) => getMcqItemKey(entry)))
+
+  const quizItems = appendWrongQuestions && wrongList.length
+    ? [
+      ...baseQuizItems,
+      ...wrongList.filter((item) => !baseKeySet.has(getMcqItemKey(item))),
+    ]
+    : baseQuizItems
 
   state.mcqQuizQuestions = quizItems
   state.mcqAnswers = Array(quizItems.length).fill('')
@@ -226,7 +486,12 @@ function startMcqQuizRound(useWrongOnly = false) {
 }
 
 function resetExerciseState() {
-  const { matching, fillBlank, writing } = state.database.questions
+  const {
+    matching,
+    fillBlank,
+    writing,
+    listing = [],
+  } = state.database.questions
   prepareMcqPool()
   state.mcqQuizQuestions = []
   state.mcqAnswers = []
@@ -235,9 +500,119 @@ function resetExerciseState() {
   state.mcqReviewOpen = false
   state.mcqSessionPhase = 'setup'
   state.mcqWrongQuestions = []
-  state.matchAnswers = Object.fromEntries(matching.map((item) => [item.id, '']))
+  clearMatchingSession()
   state.blankAnswers = Array(fillBlank.length).fill('')
   state.writingAnswers = Array(writing.length).fill('')
+  state.listingAnswers = Array(listing.length).fill('')
+  resetListingSession(listing.length)
+  state.listingPreparedDirty = true
+  invalidateScoreCaches()
+}
+
+function getMatchingSessionItems() {
+  const items = state.database.questions.matching || []
+  const itemById = new Map(items.map((item) => [String(item.id), item]))
+
+  const leftColumn = state.matchingSessionIds
+    .map((id) => itemById.get(String(id)))
+    .filter(Boolean)
+
+  const rightColumn = state.matchingRightColumnIds
+    .map((id) => itemById.get(String(id)))
+    .filter(Boolean)
+
+  return {
+    leftColumn,
+    rightColumn,
+  }
+}
+
+function isMatchingRoundComplete() {
+  if (!state.matchingSessionIds.length) return false
+  return state.matchingSessionIds.every((id) => Number(state.matchingPairs[id]) > 0)
+}
+
+function scheduleRender() {
+  if (renderScheduled) return
+  renderScheduled = true
+  window.requestAnimationFrame(() => {
+    renderScheduled = false
+    render()
+  })
+}
+
+function renderMatchingLines() {
+  const board = app.querySelector('.matching-board')
+  const svg = app.querySelector('[data-matching-lines]')
+  if (!board || !svg || state.route !== '/exercise/matching' || state.matchingSessionPhase !== 'playing') {
+    if (svg) svg.innerHTML = ''
+    return
+  }
+
+  const boardRect = board.getBoundingClientRect()
+  if (!boardRect.width || !boardRect.height) {
+    svg.innerHTML = ''
+    return
+  }
+
+  svg.setAttribute('viewBox', `0 0 ${boardRect.width} ${boardRect.height}`)
+  svg.setAttribute('width', String(boardRect.width))
+  svg.setAttribute('height', String(boardRect.height))
+
+  const lineMarkup = Object.entries(state.matchingPairs)
+    .map(([leftId, rightId]) => {
+      const leftElement = app.querySelector(`[data-match-left="${leftId}"]`)
+      const rightElement = app.querySelector(`[data-match-right="${rightId}"]`)
+      if (!leftElement || !rightElement) return ''
+
+      const leftRect = leftElement.getBoundingClientRect()
+      const rightRect = rightElement.getBoundingClientRect()
+      const x1 = leftRect.right - boardRect.left
+      const y1 = leftRect.top + (leftRect.height / 2) - boardRect.top
+      const x2 = rightRect.left - boardRect.left
+      const y2 = rightRect.top + (rightRect.height / 2) - boardRect.top
+      const controlDistance = Math.max(40, Math.abs(x2 - x1) * 0.35)
+
+      const isCorrect = state.matchingChecked && Number(leftId) === Number(rightId)
+      const isWrong = state.matchingChecked && Number(leftId) !== Number(rightId)
+      const stateClass = isCorrect
+        ? 'correct'
+        : isWrong
+          ? 'wrong'
+          : 'normal'
+
+      return `<path class="matching-line ${stateClass}" d="M ${x1} ${y1} C ${x1 + controlDistance} ${y1}, ${x2 - controlDistance} ${y2}, ${x2} ${y2}" />`
+    })
+    .filter(Boolean)
+    .join('')
+
+  svg.innerHTML = lineMarkup
+}
+
+function scheduleMatchingLinesRender() {
+  if (matchingLinesRenderScheduled) return
+  matchingLinesRenderScheduled = true
+  window.requestAnimationFrame(() => {
+    matchingLinesRenderScheduled = false
+    renderMatchingLines()
+  })
+}
+
+function pickEncouragement() {
+  if (!ENCOURAGEMENT_IMAGES.length) {
+    state.encouragementImageUrl = ''
+    state.encouragementText = ''
+    return
+  }
+
+  let nextIndex = Math.floor(Math.random() * ENCOURAGEMENT_IMAGES.length)
+  if (ENCOURAGEMENT_IMAGES.length > 1 && nextIndex === state.lastEncouragementIndex) {
+    nextIndex = (nextIndex + 1) % ENCOURAGEMENT_IMAGES.length
+  }
+
+  state.lastEncouragementIndex = nextIndex
+  state.encouragementImageUrl = ENCOURAGEMENT_IMAGES[nextIndex]
+  state.encouragementText = ENCOURAGEMENT_TEXTS[Math.floor(Math.random() * ENCOURAGEMENT_TEXTS.length)]
 }
 
 function scoreMcq() {
@@ -249,11 +624,10 @@ function scoreMcq() {
 }
 
 function scoreMatching() {
-  let score = 0
-  state.database.questions.matching.forEach((item) => {
-    if (state.matchAnswers[item.id] === item.meaning) score += 1
-  })
-  return score
+  return state.matchingSessionIds.reduce((total, leftId) => {
+    const selectedRightId = Number(state.matchingPairs[leftId])
+    return total + (selectedRightId === Number(leftId) ? 1 : 0)
+  }, 0)
 }
 
 function scoreBlanks() {
@@ -267,24 +641,136 @@ function scoreBlanks() {
 }
 
 function scoreWriting() {
-  return state.database.questions.writing.map((item, index) => {
-    const userText = normalizeText(state.writingAnswers[index] || '')
-    const hitCount = item.keywords.filter((keyword) => userText.includes(keyword)).length
-    const percent = item.keywords.length
-      ? Math.round((hitCount / item.keywords.length) * 100)
+  if (!state.writingScoreDirty) return state.writingScoreCache
+
+  const scores = state.database.questions.writing.map((item, index) => {
+    const expectedLines = (Array.isArray(item.keywords) ? item.keywords : [])
+      .map((line) => normalizeListLine(line))
+      .filter(Boolean)
+    const userLines = parseAnswerLines(state.writingAnswers[index] || '')
+
+    const remainingUserLines = [...userLines]
+    let hitCount = 0
+
+    expectedLines.forEach((expectedLine) => {
+      const exactIndex = remainingUserLines.findIndex((line) => line === expectedLine)
+      if (exactIndex >= 0) {
+        hitCount += 1
+        remainingUserLines.splice(exactIndex, 1)
+        return
+      }
+
+      const fuzzyIndex = remainingUserLines.findIndex((line) => linesMatch(line, expectedLine))
+      if (fuzzyIndex >= 0) {
+        hitCount += 1
+        remainingUserLines.splice(fuzzyIndex, 1)
+      }
+    })
+
+    const totalExpected = expectedLines.length
+    const percent = totalExpected
+      ? Math.round((hitCount / totalExpected) * 100)
       : 0
 
     return {
       hitCount,
-      total: item.keywords.length,
+      total: totalExpected,
       percent,
     }
   })
+  state.writingScoreCache = scores
+  state.writingScoreDirty = false
+  return state.writingScoreCache
 }
 
-function getWritingCorrectCount() {
-  const scores = scoreWriting()
+function getWritingCorrectCount(scores = scoreWriting()) {
   return scores.filter((item) => item.percent >= 60).length
+}
+
+function scoreListing() {
+  if (!state.listingScoreDirty) return state.listingScoreCache
+
+  const scores = getListingPreparedItems().map((item, index) => {
+    const userLines = parseWritingSampleLines(state.listingAnswers[index] || '')
+
+    const usedUserIndexes = new Set()
+    const ideaDetails = item.expectedEntries.map((expectedEntry) => {
+      const expectedNormalized = expectedEntry.normalized
+      const expectedWords = expectedEntry.words
+
+      let bestUserIndex = -1
+      let bestRatio = 0
+      let bestWordDetail = {
+        words: [],
+        matchedCount: 0,
+        totalWords: expectedWords.length,
+        ratio: 0,
+      }
+
+      userLines.forEach((userLine, userIndex) => {
+        if (usedUserIndexes.has(userIndex)) return
+
+        const userNormalized = normalizeListLine(userLine)
+        const userWords = tokenizeWords(userNormalized)
+        const wordDetail = getWordMatchDetail(expectedWords, userWords)
+
+        let ratio = wordDetail.ratio
+        if (userNormalized === expectedNormalized) {
+          ratio = 1
+        } else if (linesMatch(userNormalized, expectedNormalized)) {
+          ratio = Math.max(ratio, LISTING_MATCH_THRESHOLD)
+        }
+
+        if (ratio > bestRatio) {
+          bestRatio = ratio
+          bestUserIndex = userIndex
+          bestWordDetail = {
+            ...wordDetail,
+            ratio,
+          }
+        }
+      })
+
+      const isCorrect = bestRatio > 0
+      if (isCorrect && bestUserIndex >= 0) {
+        usedUserIndexes.add(bestUserIndex)
+      }
+
+      return {
+        expected: expectedEntry.raw,
+        user: bestUserIndex >= 0 ? userLines[bestUserIndex] : '',
+        isCorrect,
+        matchPercent: Math.round(bestRatio * 100),
+        matchedCount: bestWordDetail.matchedCount,
+        totalWords: bestWordDetail.totalWords,
+        words: bestWordDetail.words,
+      }
+    })
+
+    const hitCount = ideaDetails.filter((item) => item.isCorrect).length
+    const totalExpected = item.expectedEntries.length
+    const percent = totalExpected
+      ? Math.round((hitCount / totalExpected) * 100)
+      : 0
+
+    return {
+      hitCount,
+      total: totalExpected,
+      percent,
+      ideaDetails,
+    }
+  })
+  state.listingScoreCache = scores
+  state.listingScoreDirty = false
+  return state.listingScoreCache
+}
+
+function getListingCorrectCount(scores = scoreListing(), indexes = state.listingSessionIndexes) {
+  const indexSet = new Set(indexes || [])
+  return scores
+    .filter((_, index) => indexSet.has(index))
+    .filter((item) => item.percent >= LISTING_MATCH_THRESHOLD * 100)
+    .length
 }
 
 function isMcqRoundComplete() {
@@ -313,10 +799,11 @@ function finishMcqSession() {
 
 function openResultNotice(type) {
   if (type === 'mcq' && !isMcqRoundComplete()) {
+    const totalMcqQuestions = state.mcqQuizQuestions.length || state.mcqQuestionCount || 5
     state.resultNotice = {
       type,
       title: 'Chưa hoàn thành bài trắc nghiệm',
-      message: 'Vui lòng trả lời đủ 5 câu trước khi kiểm tra kết quả.',
+      message: `Vui lòng trả lời đủ ${totalMcqQuestions} câu trước khi kiểm tra kết quả.`,
     }
     render()
     return
@@ -334,7 +821,7 @@ function openResultNotice(type) {
 
   if (type === 'matching') {
     correct = scoreMatching()
-    total = state.database.questions.matching.length
+    total = state.matchingSessionIds.length
     title = 'Kết quả nối từ'
   }
 
@@ -345,9 +832,17 @@ function openResultNotice(type) {
   }
 
   if (type === 'writing') {
-    correct = getWritingCorrectCount()
+    const writingScores = scoreWriting()
+    correct = getWritingCorrectCount(writingScores)
     total = state.database.questions.writing.length
     title = 'Kết quả viết định nghĩa'
+  }
+
+  if (type === 'listing') {
+    const listingScores = scoreListing()
+    correct = getListingCorrectCount(listingScores, state.listingSessionIndexes)
+    total = state.listingSessionIndexes.length
+    title = 'Kết quả bài liệt kê'
   }
 
   state.resultNotice = {
@@ -355,6 +850,7 @@ function openResultNotice(type) {
     title,
     message: `Bạn làm đúng ${correct}/${total} câu.`,
   }
+  pickEncouragement()
 
   render()
 }
@@ -366,10 +862,13 @@ function renderLayout(content) {
     '/exercise/matching': 'Nối từ',
     '/exercise/fill': 'Điền chỗ trống',
     '/exercise/writing': 'Viết định nghĩa',
-    '/source': 'Thêm nguồn',
+    '/exercise/listing': 'Liệt kê ý',
     '/source/vocab': 'Thêm từ vựng',
     '/source/questions': 'Thêm câu hỏi',
+    '/source/matching': 'Thêm từ nối',
   }
+
+  const sourceGroupOpen = state.sourceGroupOpen || isSourceRoute(state.route)
 
   const questionAnswerCount = state.database.questions.mcq.length
   const vocabularyCount = state.database.vocabulary.length
@@ -378,12 +877,35 @@ function renderLayout(content) {
     questionAnswerCount +
     state.database.questions.matching.length +
     state.database.questions.fillBlank.length +
-    state.database.questions.writing.length
+    state.database.questions.writing.length +
+    (state.database.questions.listing || []).length
+  const listingCount = (state.database.questions.listing || []).length
+
+  const quickBoardMarkup = `
+    <header class="slide-board-head">
+      <strong>Bảng nhanh</strong>
+      <button type="button" class="slide-board-close" data-toggle-slide-board="true">Đóng</button>
+    </header>
+    <p class="muted">Theo dõi dữ liệu chính mà không cần rời menu.</p>
+    <div class="slide-stat-grid">
+      <article><span>Tổng câu hỏi</span><strong>${totalQuestions}</strong></article>
+      <article><span>Từ vựng</span><strong>${vocabularyCount}</strong></article>
+      <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
+      <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
+      <article><span>Câu hỏi liệt kê</span><strong>${listingCount}</strong></article>
+    </div>
+  `
 
   return `
     <main class="shell app-shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
       <aside class="sidebar">
-        <h1>learnEnglish</h1>
+        <img
+          class="brand-logo sidebar-logo"
+          src="/logo.jpg"
+          alt="Logo Học tiếng Anh cùng Hồng Nga"
+          onerror="this.style.display='none'"
+        />
+        <h1>Học tiếng Anh cùng Hồng Nga</h1>
         <p class="muted">Luyện tập và quản lý dữ liệu học tiếng Anh.</p>
 
         <p class="group-title">Điều hướng</p>
@@ -394,11 +916,23 @@ function renderLayout(content) {
         <button class="nav-btn ${state.route === '/exercise/matching' ? 'active' : ''}" data-route="/exercise/matching">Nối từ</button>
         <button class="nav-btn ${state.route === '/exercise/fill' ? 'active' : ''}" data-route="/exercise/fill">Điền chỗ trống</button>
         <button class="nav-btn ${state.route === '/exercise/writing' ? 'active' : ''}" data-route="/exercise/writing">Viết</button>
+        <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing">Liệt kê</button>
 
         <p class="group-title">Nguồn dữ liệu</p>
-        <button class="nav-btn ${state.route === '/source' ? 'active' : ''}" data-route="/source">Trang thêm nguồn</button>
-        <button class="nav-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
-        <button class="nav-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
+        <button
+          class="nav-btn nav-group-toggle ${sourceGroupOpen ? 'active' : ''}"
+          type="button"
+          data-toggle-source-group="true"
+          aria-expanded="${sourceGroupOpen ? 'true' : 'false'}"
+        >
+          <span>Thêm nguồn</span>
+          <span class="nav-caret">${sourceGroupOpen ? '▾' : '▸'}</span>
+        </button>
+        <div class="nav-subgroup ${sourceGroupOpen ? 'open' : ''}">
+          <button class="nav-btn nav-sub-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
+          <button class="nav-btn nav-sub-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
+          <button class="nav-btn nav-sub-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching">Nhiệm vụ: Thêm từ nối</button>
+        </div>
 
         <button
           class="slide-trigger ${state.slideBoardOpen ? 'active' : ''}"
@@ -410,19 +944,20 @@ function renderLayout(content) {
         </button>
 
         <section class="slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
-          <header class="slide-board-head">
-            <strong>Bảng nhanh</strong>
-            <button type="button" class="slide-board-close" data-toggle-slide-board="true">Đóng</button>
-          </header>
-          <p class="muted">Theo dõi dữ liệu chính mà không cần rời menu.</p>
-          <div class="slide-stat-grid">
-            <article><span>Tổng câu hỏi</span><strong>${totalQuestions}</strong></article>
-            <article><span>Từ vựng</span><strong>${vocabularyCount}</strong></article>
-            <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
-            <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
-          </div>
+          ${quickBoardMarkup}
         </section>
       </aside>
+
+      <button
+        type="button"
+        class="mobile-slide-board-backdrop ${state.slideBoardOpen ? 'open' : ''}"
+        data-toggle-slide-board="true"
+        aria-label="Đóng bảng nhanh"
+      ></button>
+
+      <section class="mobile-slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
+        ${quickBoardMarkup}
+      </section>
 
       <button
         type="button"
@@ -445,7 +980,7 @@ function renderLayout(content) {
               <span></span>
               <span></span>
             </button>
-            <p class="route-pill">${routeTitleMap[state.route] || 'learnEnglish'}</p>
+            <p class="route-pill">${routeTitleMap[state.route] || 'Học tiếng Anh cùng Hồng Nga'}</p>
           </div>
           <p class="muted">Dữ liệu đang truy xuất từ backend SQLite.</p>
         </header>
@@ -458,8 +993,16 @@ function renderLayout(content) {
             <section class="result-dialog" role="dialog" aria-modal="true" aria-label="Thông báo kết quả">
               <h3>${escapeHtml(state.resultNotice.title)}</h3>
               <p>${escapeHtml(state.resultNotice.message)}</p>
+              ${state.encouragementImageUrl
+    ? `
+                  <article class="result-encouragement">
+                    <img src="${escapeHtml(state.encouragementImageUrl)}" alt="Hình động viên" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+                    <p>${escapeHtml(state.encouragementText || 'Giữ vững phong độ học tập nhé!')}</p>
+                  </article>
+                `
+    : ''}
               ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-open-mcq-review>Xem lại đúng/sai</button>' : ''}
-              ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-retry-mcq>Làm bộ 5 câu mới</button>' : ''}
+              ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-retry-mcq>Random bộ mới</button>' : ''}
               <button type="button" class="action-btn" data-close-result="true">Đóng</button>
             </section>
           </div>
@@ -473,12 +1016,18 @@ function renderLandingPage() {
   return `
     <main class="landing-shell">
       <section class="landing-card">
-        <p class="landing-eyebrow">learnEnglish</p>
-        <h1>Luyện tiếng Anh theo cách đơn giản</h1>
+        <img
+          class="brand-logo landing-logo"
+          src="/logo.jpg"
+          alt="Logo Học tiếng Anh cùng Hồng Nga"
+          onerror="this.style.display='none'"
+        />
+        <p class="landing-eyebrow">Học tiếng Anh cùng Hồng Nga</p>
+        <h1>Luyện tiếng Anh 5 cùng Hồng Nga</h1>
         <p class="landing-subtitle">Bắt đầu nhanh với bộ bài tập và trang quản lý dữ liệu học tập.</p>
         <div class="landing-actions">
           <button type="button" class="action-btn" data-route="/exercise/mcq">Vào luyện tập</button>
-          <button type="button" class="small-btn" data-route="/source">Quản lý nguồn dữ liệu</button>
+          <button type="button" class="small-btn" data-route="/source/vocab">Quản lý nguồn dữ liệu</button>
         </div>
       </section>
     </main>
@@ -555,10 +1104,11 @@ function renderHome() {
   const matchingCount = state.database.questions.matching.length
   const blankCount = state.database.questions.fillBlank.length
   const writingCount = state.database.questions.writing.length
+  const listingCount = (state.database.questions.listing || []).length
 
   return `
     <section class="page-card">
-      <h2>learnEnglish</h2>
+      <h2>Học tiếng Anh cùng Hồng Nga</h2>
       <p>Chọn tính năng ở menu bên trái. Mỗi bài tập sẽ được chấm dựa trên dữ liệu đang lưu trong cơ sở dữ liệu.</p>
       <div class="stat-grid">
         <article><strong>${vocabCount}</strong><span>Từ vựng</span></article>
@@ -566,6 +1116,7 @@ function renderHome() {
         <article><strong>${matchingCount}</strong><span>Cặp nối từ</span></article>
         <article><strong>${blankCount}</strong><span>Câu điền trống</span></article>
         <article><strong>${writingCount}</strong><span>Đề viết</span></article>
+        <article><strong>${listingCount}</strong><span>Câu hỏi liệt kê</span></article>
       </div>
     </section>
   `
@@ -574,6 +1125,7 @@ function renderHome() {
 function renderMcqPage() {
   const questions = state.mcqQuizQuestions
   const score = scoreMcq()
+  const answeredCount = state.mcqAnswers.filter((answer) => String(answer || '').trim().length > 0).length
   const availableCount = state.mcqPoolQuestions.length
   const hiddenCorrectCount = state.mcqCorrectQuestionIds.length
   const selectedCount = Math.min(state.mcqQuestionCount, availableCount)
@@ -587,6 +1139,7 @@ function renderMcqPage() {
   const sessionCompleted = state.mcqSessionPhase === 'completed'
   const inPlay = state.mcqSessionPhase === 'playing'
   const currentQuestion = questions[state.mcqCurrentIndex]
+  const canSubmit = inPlay && questions.length > 0 && answeredCount === questions.length
 
   const setupPanel = setupVisible
     ? `
@@ -638,6 +1191,7 @@ function renderMcqPage() {
           <span class="question-order">Câu ${state.mcqCurrentIndex + 1}/${questions.length}</span>
           <span class="question-text">${escapeHtml(currentQuestion.question)}</span>
         </h3>
+        <p class="muted">Đã trả lời: <strong>${answeredCount}/${questions.length}</strong> câu. Bạn có thể quay lại câu trước để sửa đáp án.</p>
         <div class="option-grid">
           ${currentQuestion.options
             .map(
@@ -650,18 +1204,14 @@ function renderMcqPage() {
             )
             .join('')}
         </div>
+        <div class="mcq-complete-actions">
+          <button type="button" class="small-btn" data-mcq-prev ${state.mcqCurrentIndex > 0 ? '' : 'disabled'}>Câu trước</button>
+          <button type="button" class="small-btn" data-mcq-next ${state.mcqCurrentIndex + 1 < questions.length ? '' : 'disabled'}>Câu kế tiếp</button>
+        </div>
+        ${canSubmit
+          ? '<button type="button" class="action-btn" data-check-result="mcq">Kiểm tra kết quả</button>'
+          : '<p class="muted">Nút kiểm tra kết quả sẽ xuất hiện khi bạn trả lời hết tất cả câu hỏi.</p>'}
       </section>
-      ${state.mcqNextPromptOpen
-        ? `
-          <article class="question-card next-question-board">
-            <h3>${state.mcqCurrentIndex + 1 < questions.length ? 'Đã lưu câu trả lời.' : 'Bạn đã hoàn thành bộ câu hỏi.'}</h3>
-            <p>${state.mcqCurrentIndex + 1 < questions.length ? 'Bấm để qua câu kế tiếp.' : 'Bấm để xem kết quả.'}</p>
-            <button type="button" class="action-btn" data-mcq-next>
-              ${state.mcqCurrentIndex + 1 < questions.length ? 'Qua câu kế tiếp' : 'Xem kết quả'}
-            </button>
-          </article>
-        `
-        : ''}
     `
     : ''
 
@@ -721,46 +1271,102 @@ function renderMcqPage() {
       ${playPanel}
       ${reviewPanel}
       ${sessionCompleted ? `<p class="score-line">Điểm: <strong>${score}/${questions.length}</strong></p>` : ''}
-      ${inPlay ? `<p class="score-line">Điểm tạm thời: <strong>${score}/${questions.length}</strong></p>` : ''}
-      ${inPlay ? `<button type="button" class="small-btn" data-mcq-retry>Kiểm tra lại (random bộ mới)</button>` : ''}
+      ${inPlay ? '<button type="button" class="small-btn" data-mcq-retry>Random bộ mới</button>' : ''}
     </section>
   `
 }
 
 function renderMatchingPage() {
   const items = state.database.questions.matching
+  const { leftColumn, rightColumn } = getMatchingSessionItems()
   const score = scoreMatching()
-  const meanings = [...items].map((item) => item.meaning).sort(() => Math.random() - 0.5)
+  const maxSelectable = Math.min(10, Math.max(1, items.length || 1))
+  const selectedCount = Math.min(maxSelectable, Math.max(1, state.matchingQuestionCount || 1))
+  const isComplete = isMatchingRoundComplete()
+  const inPlay = state.matchingSessionPhase === 'playing'
+  const selectedLeftId = Number(state.matchingSelectedLeftId)
+  const rightOwnershipMap = Object.entries(state.matchingPairs).reduce((map, [leftId, rightId]) => {
+    map[String(rightId)] = Number(leftId)
+    return map
+  }, {})
 
   return `
     <section class="page-card">
       <h2>Nối từ</h2>
-      ${items
-        .map(
-          (item) => `
-            <article class="question-card compact">
-              <h3 class="question-title">
-                <span class="question-order">Chọn nghĩa phù hợp</span>
-                <span class="question-text">${escapeHtml(item.word)}</span>
-              </h3>
-              <select data-match-id="${item.id}">
-                <option value="">-- Chọn nghĩa --</option>
-                ${meanings
-                  .map(
-                    (meaning) => `
-                      <option value="${escapeHtml(meaning)}" ${state.matchAnswers[item.id] === meaning ? 'selected' : ''}>
-                        ${escapeHtml(meaning)}
-                      </option>
-                    `,
-                  )
-                  .join('')}
-              </select>
-            </article>
-          `,
-        )
-        .join('')}
-      <p class="score-line">Điểm: <strong>${score}/${items.length}</strong></p>
-      <button type="button" class="action-btn" data-check-result="matching">Kiểm tra kết quả</button>
+      <article class="question-card compact">
+        <label>
+          Số lượng cặp từ muốn nối
+          <select data-matching-question-count>
+            ${Array.from({ length: maxSelectable }, (_, index) => index + 1)
+      .map((value) => `<option value="${value}" ${selectedCount === value ? 'selected' : ''}>${value} cặp</option>`)
+      .join('')}
+          </select>
+        </label>
+        ${inPlay
+      ? '<button type="button" class="small-btn" data-matching-reset-session>Random bộ nối mới</button>'
+      : '<button type="button" class="action-btn" data-matching-start>Bắt đầu</button>'}
+      </article>
+
+      ${inPlay && leftColumn.length
+      ? `
+          <article class="question-card">
+            <p class="muted">Bấm 1 từ ở cột A, sau đó bấm 1 từ ở cột B để nối.</p>
+            <div class="matching-board-wrap">
+              <svg class="matching-lines" data-matching-lines aria-hidden="true"></svg>
+              <div class="matching-board">
+                <section class="matching-column">
+                  <h3>Cột A</h3>
+                  ${leftColumn
+      .map((item) => {
+        const matchedRightId = Number(state.matchingPairs[item.id])
+        const isSelected = selectedLeftId === Number(item.id)
+        const isMatched = matchedRightId > 0
+        const isCorrect = state.matchingChecked && matchedRightId === Number(item.id)
+        const isWrong = state.matchingChecked && isMatched && matchedRightId !== Number(item.id)
+
+        return `
+                      <button
+                        type="button"
+                        class="matching-item left ${isSelected ? 'selected' : ''} ${isMatched ? 'matched' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}"
+                        data-match-left="${item.id}"
+                      >
+                        ${escapeHtml(item.word)}
+                      </button>
+                    `
+      })
+      .join('')}
+                </section>
+
+                <section class="matching-column">
+                  <h3>Cột B</h3>
+                  ${rightColumn
+      .map((item) => {
+        const ownerLeftId = Number(rightOwnershipMap[String(item.id)] || 0)
+        const isTaken = ownerLeftId > 0
+        const isSelectedLink = isTaken && ownerLeftId === selectedLeftId
+        const isCorrect = state.matchingChecked && isTaken && ownerLeftId === Number(item.id)
+        const isWrong = state.matchingChecked && isTaken && ownerLeftId !== Number(item.id)
+
+        return `
+                      <button
+                        type="button"
+                        class="matching-item right ${isTaken ? 'matched' : ''} ${isSelectedLink ? 'selected-link' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}"
+                        data-match-right="${item.id}"
+                      >
+                        ${escapeHtml(item.meaning)}
+                      </button>
+                    `
+      })
+      .join('')}
+                </section>
+              </div>
+            </div>
+          </article>
+
+          <p class="score-line">Đã nối: <strong>${Object.keys(state.matchingPairs).length}/${leftColumn.length}</strong> cặp</p>
+          ${isComplete ? '<button type="button" class="action-btn" data-matching-check-result>Kiểm tra kết quả</button>' : '<p class="muted">Nối đủ tất cả cặp để hiện nút kiểm tra kết quả.</p>'}
+        `
+      : items.length ? '<p class="muted">Chọn số lượng cặp và nhấn Bắt đầu để làm bài nối từ.</p>' : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
     </section>
   `
 }
@@ -791,7 +1397,7 @@ function renderFillPage() {
 function renderWritingPage() {
   const items = state.database.questions.writing
   const scores = scoreWriting()
-  const correctCount = getWritingCorrectCount()
+  const correctCount = getWritingCorrectCount(scores)
 
   return `
     <section class="page-card">
@@ -805,8 +1411,9 @@ function renderWritingPage() {
                 <span class="question-text">${escapeHtml(item.word)}</span>
               </h3>
               <p class="question-hint">${escapeHtml(item.hint)}</p>
-              <textarea data-writing-index="${index}" rows="4" placeholder="Viết định nghĩa của bạn...">${escapeHtml(state.writingAnswers[index] || '')}</textarea>
-              <p class="muted">Độ khớp từ khóa: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
+              <p class="muted">Mỗi dòng là 1 ý/1 đáp án. Có thể dùng -, *, hoặc số thứ tự. Không cần đúng thứ tự.</p>
+              <textarea data-writing-index="${index}" rows="5" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.writingAnswers[index] || '')}</textarea>
+              <p class="muted">Độ khớp theo dòng: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
             </article>
           `,
         )
@@ -817,22 +1424,123 @@ function renderWritingPage() {
   `
 }
 
-function renderSourceHome() {
+function renderListingPage() {
+  const items = state.database.questions.listing || []
+  const scores = scoreListing()
+  const sessionIndexes = state.listingSessionIndexes || []
+  const correctCount = getListingCorrectCount(scores, sessionIndexes)
+  const listingThresholdPercent = Math.round(LISTING_MATCH_THRESHOLD * 100)
+  const totalCount = sessionIndexes.length
+  const currentIndex = Math.max(0, Math.min(state.listingCurrentIndex, Math.max(totalCount - 1, 0)))
+  const activeQuestionIndex = sessionIndexes[currentIndex] ?? 0
+  const currentItem = items[activeQuestionIndex]
+  const currentScore = scores[activeQuestionIndex] || { percent: 0, hitCount: 0, total: 0, ideaDetails: [] }
+  const currentChecked = Boolean(state.listingCheckedMap[activeQuestionIndex])
+  const checkedCount = sessionIndexes.filter((index) => state.listingCheckedMap[index]).length
+  const allChecked = totalCount > 0 && checkedCount === totalCount
+  const maxSelectable = Math.min(5, Math.max(1, items.length || 1))
+  const currentSelectable = Math.min(maxSelectable, Math.max(1, state.listingQuestionCount || 1))
+  const totalCorrectCount = scores.reduce((sum, score) => sum + score.hitCount, 0)
+  const totalItemCount = scores.reduce((sum, score) => sum + score.total, 0)
+
   return `
     <section class="page-card">
-      <h2>Thêm nguồn</h2>
-      <p>Bạn có 2 nhiệm vụ riêng:</p>
-      <div class="action-grid">
-        <button class="action-btn" data-route="/source/vocab">Nhiệm vụ 1: Thêm từ vựng</button>
-        <button class="action-btn" data-route="/source/questions">Nhiệm vụ 2: Thêm câu hỏi + câu trả lời</button>
+      <h2>Liệt kê ý</h2>
+      <article class="question-card compact">
+        <label>
+          Số lượng câu liệt kê (1-5)
+          <select data-listing-question-count>
+            ${Array.from({ length: maxSelectable }, (_, index) => index + 1)
+      .map((value) => `<option value="${value}" ${currentSelectable === value ? 'selected' : ''}>${value} câu</option>`)
+      .join('')}
+          </select>
+        </label>
+        <button type="button" class="small-btn" data-listing-reset-session>Random bộ câu mới</button>
+      </article>
+      ${currentItem
+      ? `
+            <article class="question-card">
+              <h3 class="question-title">
+                <span class="question-order">Câu ngẫu nhiên (${checkedCount}/${totalCount} đã kiểm tra)</span>
+                <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
+              </h3>
+              <p class="question-hint">${escapeHtml(currentItem.hint || 'Liệt kê các ý theo từng dòng.')}</p>
+              <p class="muted">Mỗi dòng là 1 ý. Không cần đúng thứ tự.</p>
+              <textarea data-listing-index="${activeQuestionIndex}" rows="6" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.listingAnswers[activeQuestionIndex] || '')}</textarea>
+              <p class="muted">Độ khớp theo dòng: <strong>${currentScore.percent}%</strong> (${currentScore.hitCount}/${currentScore.total})</p>
+              ${currentChecked
+      ? `
+                <div class="listing-review-block">
+                  <p class="muted"><strong>Đáp án đúng và đối chiếu chi tiết:</strong></p>
+                  ${(currentScore.ideaDetails || [])
+      .map((detail) => `
+                      <article class="listing-review-item ${detail.isCorrect ? 'ok' : 'wrong'}">
+                        <p><strong>Ý chuẩn:</strong> ${escapeHtml(detail.expected)}</p>
+                        <p><strong>Bạn trả lời:</strong> ${escapeHtml(detail.user || '(chưa có ý phù hợp)')}</p>
+                        <p class="muted">Khớp từ: ${detail.matchedCount}/${detail.totalWords} (${detail.matchPercent}%)</p>
+                        <p class="muted">Từ chi tiết: ${detail.words
+            .map((word) => (word.matched ? `✓ ${word.word}` : `✗ ${word.word}`))
+            .map((item) => escapeHtml(item))
+            .join(' · ')}</p>
+                      </article>
+                    `)
+      .join('')}
+                </div>
+              `
+      : ''}
+            </article>
+            ${currentChecked
+      ? `
+              <div class="mcq-complete-actions">
+                ${!allChecked ? '<button type="button" class="action-btn" data-listing-next-question>Qua câu ngẫu nhiên tiếp theo</button>' : ''}
+                ${allChecked ? '<button type="button" class="small-btn" data-check-result="listing">Xem tổng kết</button>' : ''}
+              </div>
+            `
+      : '<button type="button" class="action-btn" data-listing-check-current>Kiểm tra câu hiện tại</button>'}
+          `
+      : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
+      <p class="score-line">Đã kiểm tra: <strong>${checkedCount}/${totalCount}</strong> câu</p>
+      <p class="score-line">Tổng ý đúng: <strong>${totalCorrectCount}/${totalItemCount}</strong> ý</p>
+    </section>
+  `
+}
+
+function renderSourceMatching() {
+  const matchingList = state.database.questions.matching || []
+
+  return `
+    <section class="page-card">
+      <h2>Nhiệm vụ: Thêm từ nối</h2>
+      <form id="matching-form" class="stack-form">
+        <p class="muted">Thêm cặp từ nối theo 2 cột A và B để dùng cho bài tập nối từ.</p>
+        <label>Từ cột A<input name="word" required placeholder="diligent" /></label>
+        <label>Từ cột B<input name="meaning" required placeholder="hard-working and careful" /></label>
+        <button type="submit">Lưu từ nối vào cơ sở dữ liệu</button>
+      </form>
+
+      <h3>Quản lý từ nối (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${matchingList.length
+          ? matchingList
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <p><strong>Cột A:</strong> ${escapeHtml(item.word)}</p>
+                    <p><strong>Cột B:</strong> ${escapeHtml(item.meaning)}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button class="small-btn" data-edit-source-matching="${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-source-matching="${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có cặp từ nối nào.</p>'}
       </div>
-      <h3>Từ vựng gần đây</h3>
-      <ul class="list-view">
-        ${state.database.vocabulary
-          .slice(0, 6)
-          .map((item) => `<li><strong>${escapeHtml(item.word)}:</strong> ${escapeHtml(item.definition)}</li>`)
-          .join('')}
-      </ul>
+
+      ${renderSourceMessage()}
     </section>
   `
 }
@@ -934,7 +1642,7 @@ function renderManagedQuestions() {
           <div>
             <strong>${escapeHtml(item.word)}</strong>
             <p>${escapeHtml(item.hint)}</p>
-            <p class="muted">Từ khóa: ${escapeHtml(item.keywords.join(', '))}</p>
+            <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml(item.keywords.join(' | '))}</p>
           </div>
           <div class="row-actions">
             <button class="small-btn" data-edit-question="${type}:${item.id}">Sửa</button>
@@ -948,6 +1656,22 @@ function renderManagedQuestions() {
 
 function renderSourceQuestion() {
   const questionAnswerList = state.database.questions.mcq || []
+  const writingQuestionList = (state.database.questions.writing || []).map((item) => ({
+    id: item.id,
+    questionType: 'writing',
+    prompt: item.word,
+    hint: item.hint,
+    answers: item.keywords || [],
+  }))
+  const listingQuestionList = (state.database.questions.listing || []).map((item) => ({
+    id: item.id,
+    questionType: 'listing',
+    prompt: item.prompt,
+    hint: item.hint,
+    answers: item.answers || [],
+  }))
+  const sharedListQuestions = [...writingQuestionList, ...listingQuestionList]
+    .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))
 
   return `
     <section class="page-card">
@@ -957,6 +1681,24 @@ function renderSourceQuestion() {
         <label>Câu hỏi<input name="question" required placeholder="Ví dụ: Nghĩa của từ resilient là gì?" /></label>
         <label>Đáp án đúng<input name="answer" required placeholder="Có khả năng phục hồi nhanh sau khó khăn" /></label>
         <button type="submit">Lưu câu hỏi vào cơ sở dữ liệu</button>
+      </form>
+
+      <h3>Câu hỏi liệt kê (dùng chung cho Viết và Liệt kê)</h3>
+      <form id="shared-list-question-form" class="stack-form">
+        <label>
+          Dùng cho bài tập
+          <select name="targetType" required>
+            <option value="listing">Liệt kê ý</option>
+            <option value="writing">Viết định nghĩa</option>
+          </select>
+        </label>
+        <label>Nội dung câu hỏi / từ cần định nghĩa<input name="prompt" required placeholder="Liệt kê 3 lợi ích của việc đọc sách hoặc từ resilient" /></label>
+        <label>Gợi ý<input name="hint" placeholder="Mỗi dòng một ý ngắn" /></label>
+        <label>
+          Đáp án mẫu theo dòng
+          <textarea name="answersText" rows="5" required placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3"></textarea>
+        </label>
+        <button type="submit">Lưu câu hỏi liệt kê</button>
       </form>
 
       <h3>Quản lý câu hỏi/câu trả lời (sửa/xóa)</h3>
@@ -981,6 +1723,30 @@ function renderSourceQuestion() {
           : '<p class="muted">Chưa có câu hỏi/câu trả lời nào.</p>'}
       </div>
 
+      <h3>Quản lý câu hỏi liệt kê dùng chung (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${sharedListQuestions.length
+          ? sharedListQuestions
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <strong>${escapeHtml(item.prompt)}</strong>
+                    <p>${escapeHtml(item.hint)}</p>
+                    <p class="muted">Dùng cho: ${item.questionType === 'writing' ? 'Viết định nghĩa' : 'Liệt kê ý'}</p>
+                    <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml((item.answers || []).join(' | '))}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button class="small-btn" data-edit-shared-list-question="${item.questionType}:${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-shared-list-question="${item.questionType}:${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có câu hỏi liệt kê dùng chung nào.</p>'}
+      </div>
+
       ${renderSourceMessage()}
     </section>
   `
@@ -997,9 +1763,10 @@ function renderCurrentPage() {
   if (state.route === '/exercise/matching') return renderLayout(renderMatchingPage())
   if (state.route === '/exercise/fill') return renderLayout(renderFillPage())
   if (state.route === '/exercise/writing') return renderLayout(renderWritingPage())
-  if (state.route === '/source') return renderLayout(renderSourceHome())
+  if (state.route === '/exercise/listing') return renderLayout(renderListingPage())
   if (state.route === '/source/vocab') return renderLayout(renderSourceVocab())
   if (state.route === '/source/questions') return renderLayout(renderSourceQuestion())
+  if (state.route === '/source/matching') return renderLayout(renderSourceMatching())
   return renderLandingPage()
 }
 
@@ -1027,7 +1794,23 @@ function attachNavEvents() {
 
   document.querySelectorAll('[data-toggle-slide-board]').forEach((button) => {
     button.addEventListener('click', () => {
+      const isMobile = window.innerWidth <= 980
+      if (isMobile && !state.slideBoardOpen) {
+        state.slideBoardOpen = true
+        state.sidebarOpen = false
+        window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
+        render()
+        return
+      }
+
       state.slideBoardOpen = !state.slideBoardOpen
+      render()
+    })
+  })
+
+  document.querySelectorAll('[data-toggle-source-group]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.sourceGroupOpen = !state.sourceGroupOpen
       render()
     })
   })
@@ -1036,176 +1819,281 @@ function attachNavEvents() {
     button.addEventListener('click', () => {
       state.sidebarOpen = !state.sidebarOpen
       window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
-      if (!state.sidebarOpen) {
-        state.slideBoardOpen = false
-      }
+      state.slideBoardOpen = false
       render()
     })
   })
 }
 
 function attachExerciseEvents() {
-  document.querySelectorAll('input[type="radio"]').forEach((input) => {
-    input.addEventListener('change', (event) => {
-      const target = event.target
-      if (state.mcqReviewOpen || state.mcqSessionPhase !== 'playing') return
+  if (exerciseEventsBound) return
+  exerciseEventsBound = true
 
-      if (target.name !== 'mcq-current') {
-        const index = Number(target.name.split('-')[1])
-        state.mcqAnswers[index] = target.value
-        render()
-        return
-      }
+  app.addEventListener('change', async (event) => {
+    const target = event.target
+
+    if (target.matches('input[type="radio"]')) {
+      if (state.mcqReviewOpen || state.mcqSessionPhase !== 'playing') return
+      if (target.name !== 'mcq-current') return
 
       state.mcqAnswers[state.mcqCurrentIndex] = target.value
-      state.mcqNextPromptOpen = true
+      scheduleRender()
+      return
+    }
+
+    if (target.matches('[data-listing-question-count]')) {
+      const nextValue = Number(target.value) || 1
+      state.listingQuestionCount = Math.min(5, Math.max(1, nextValue))
+      resetListingSession((state.database.questions.listing || []).length)
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-mcq-next]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (state.mcqCurrentIndex + 1 < state.mcqQuizQuestions.length) {
-        state.mcqCurrentIndex += 1
-        state.mcqNextPromptOpen = false
-        render()
-        return
-      }
-
-      state.mcqNextPromptOpen = false
-      finishMcqSession()
-      openResultNotice('mcq')
-    })
-  })
-
-  document.querySelectorAll('select[data-match-id]').forEach((select) => {
-    select.addEventListener('change', (event) => {
-      const target = event.target
-      state.matchAnswers[target.dataset.matchId] = target.value
+    if (target.matches('[data-matching-question-count]')) {
+      const nextValue = Number(target.value) || 1
+      state.matchingQuestionCount = Math.min(10, Math.max(1, nextValue))
+      clearMatchingSession()
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('input[data-blank-index]').forEach((input) => {
-    input.addEventListener('input', (event) => {
-      const target = event.target
-      state.blankAnswers[Number(target.dataset.blankIndex)] = target.value
-      render()
-    })
-  })
-
-  document.querySelectorAll('textarea[data-writing-index]').forEach((textarea) => {
-    textarea.addEventListener('input', (event) => {
-      const target = event.target
-      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-mcq-source-mode]').forEach((select) => {
-    select.addEventListener('change', async (event) => {
-      const target = event.target
+    if (target.matches('[data-mcq-source-mode]')) {
       state.mcqSourceMode = target.value
       await loadDataForCurrentRoute()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-mcq-question-count]').forEach((select) => {
-    select.addEventListener('change', (event) => {
-      const target = event.target
+    if (target.matches('[data-mcq-question-count]')) {
       state.mcqQuestionCount = Number(target.value) || 5
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-mcq-start]').forEach((button) => {
-    button.addEventListener('click', () => {
-      startMcqQuizRound(false)
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-mcq-exclude-correct]').forEach((checkbox) => {
-    checkbox.addEventListener('change', (event) => {
-      const target = event.target
+    if (target.matches('[data-mcq-exclude-correct]')) {
       state.mcqExcludeCorrectEnabled = Boolean(target.checked)
       prepareMcqPool()
       render()
-    })
+    }
   })
 
-  document.querySelectorAll('[data-mcq-clear-correct]').forEach((button) => {
-    button.addEventListener('click', () => {
+  app.addEventListener('input', (event) => {
+    const target = event.target
+
+    if (target.matches('input[data-blank-index]')) {
+      state.blankAnswers[Number(target.dataset.blankIndex)] = target.value
+      scheduleRender()
+      return
+    }
+
+    if (target.matches('textarea[data-writing-index]')) {
+      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
+      state.writingScoreDirty = true
+      return
+    }
+
+    if (target.matches('textarea[data-listing-index]')) {
+      const index = Number(target.dataset.listingIndex)
+      state.listingAnswers[index] = target.value
+      state.listingCheckedMap[index] = false
+      state.listingScoreDirty = true
+    }
+  })
+
+  app.addEventListener('focusout', (event) => {
+    const target = event.target
+
+    if (target.matches('textarea[data-writing-index]')) {
+      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
+      render()
+      return
+    }
+
+    if (target.matches('textarea[data-listing-index]')) {
+      state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
+      render()
+    }
+  })
+
+  app.addEventListener('click', (event) => {
+    const target = event.target
+    const button = target.closest('button')
+
+    if (button?.matches('[data-mcq-prev]')) {
+      if (state.mcqCurrentIndex <= 0) return
+      state.mcqCurrentIndex -= 1
+      state.mcqNextPromptOpen = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-mcq-next]')) {
+      if (state.mcqCurrentIndex + 1 >= state.mcqQuizQuestions.length) return
+      state.mcqCurrentIndex += 1
+      state.mcqNextPromptOpen = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-listing-check-current]')) {
+      const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
+      state.listingCheckedMap[activeIndex] = true
+      render()
+      return
+    }
+
+    if (button?.matches('[data-listing-next-question]')) {
+      const uncheckedIndexes = state.listingSessionIndexes
+        .filter((index) => !state.listingCheckedMap[index])
+
+      if (!uncheckedIndexes.length) return
+
+      const randomIndex = Math.floor(Math.random() * uncheckedIndexes.length)
+      const nextQuestionIndex = uncheckedIndexes[randomIndex]
+      state.listingCurrentIndex = state.listingSessionIndexes.findIndex((index) => index === nextQuestionIndex)
+      render()
+      return
+    }
+
+    if (button?.matches('[data-listing-reset-session]')) {
+      resetListingSession((state.database.questions.listing || []).length)
+      render()
+      return
+    }
+
+    if (button?.matches('[data-matching-reset-session]')) {
+      startMatchingSession()
+      render()
+      return
+    }
+
+    if (button?.matches('[data-matching-start]')) {
+      startMatchingSession()
+      render()
+      return
+    }
+
+    if (button?.matches('[data-match-left]')) {
+      const leftId = Number(button.dataset.matchLeft)
+      if (!leftId) return
+      state.matchingSelectedLeftId = leftId
+      render()
+      return
+    }
+
+    if (button?.matches('[data-match-right]')) {
+      const rightId = Number(button.dataset.matchRight)
+      const selectedLeftId = Number(state.matchingSelectedLeftId)
+      if (!rightId || !selectedLeftId) return
+      const hadPreviousLink = Number(state.matchingPairs[selectedLeftId]) > 0
+
+      Object.entries(state.matchingPairs).forEach(([leftId, linkedRightId]) => {
+        if (Number(leftId) !== selectedLeftId && Number(linkedRightId) === rightId) {
+          delete state.matchingPairs[leftId]
+        }
+      })
+
+      state.matchingPairs[selectedLeftId] = rightId
+      state.matchingChecked = false
+
+      if (!hadPreviousLink) {
+        const nextUnmatchedLeftId = state.matchingSessionIds
+          .map((id) => Number(id))
+          .find((leftId) => !Number(state.matchingPairs[leftId]))
+        state.matchingSelectedLeftId = nextUnmatchedLeftId || selectedLeftId
+      }
+
+      render()
+      return
+    }
+
+    if (button?.matches('[data-matching-check-result]')) {
+      if (!isMatchingRoundComplete()) return
+      state.matchingChecked = true
+      openResultNotice('matching')
+      return
+    }
+
+    if (button?.matches('[data-mcq-start]')) {
+      state.resultNotice = null
+      startMcqQuizRound()
+      render()
+      return
+    }
+
+    if (button?.matches('[data-mcq-clear-correct]')) {
       state.mcqCorrectQuestionIds = []
       prepareMcqPool()
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-mcq-retry-wrong]').forEach((button) => {
-    button.addEventListener('click', () => {
-      startMcqQuizRound(true)
+    if (button?.matches('[data-mcq-retry-wrong]')) {
+      startMcqQuizRound({
+        useWrongOnly: true,
+      })
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-check-result]').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (button?.matches('[data-mcq-retry]') || button?.matches('[data-retry-mcq]')) {
+      state.resultNotice = null
+      const wrongSnapshot = [...state.mcqWrongQuestions]
+
+      prepareMcqPool()
+      if (!state.mcqPoolQuestions.length) {
+        state.mcqSessionPhase = 'setup'
+        render()
+        return
+      }
+
+      startMcqQuizRound({
+        appendWrongQuestions: true,
+        wrongQuestions: wrongSnapshot,
+      })
+      render()
+      return
+    }
+
+    if (button?.matches('[data-open-mcq-review]')) {
+      state.resultNotice = null
+      state.mcqReviewOpen = true
+      render()
+      return
+    }
+
+    if (button?.matches('[data-close-mcq-review]')) {
+      state.mcqReviewOpen = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-check-result]')) {
       const type = button.dataset.checkResult
       if (!type) return
       if (type === 'mcq' && !isMcqRoundComplete()) {
         openResultNotice('mcq')
         return
       }
-      openResultNotice(type)
-    })
-  })
 
-  document.querySelectorAll('[data-mcq-retry]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      state.resultNotice = null
-      if (state.mcqSessionPhase === 'completed' && state.mcqWrongQuestions.length) {
-        startMcqQuizRound(true)
-        render()
-        return
+      if (type === 'mcq' && state.mcqSessionPhase === 'playing') {
+        finishMcqSession()
       }
-      await loadDataForCurrentRoute()
-    })
-  })
 
-  document.querySelectorAll('[data-open-mcq-review]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.resultNotice = null
-      state.mcqReviewOpen = true
-      render()
-    })
-  })
+      openResultNotice(type)
+      return
+    }
 
-  document.querySelectorAll('[data-close-mcq-review]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.mcqReviewOpen = false
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-retry-mcq]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      state.resultNotice = null
-      await loadDataForCurrentRoute()
-    })
-  })
-
-  document.querySelectorAll('[data-close-result]').forEach((element) => {
-    element.addEventListener('click', (event) => {
+    const closeTarget = target.closest('[data-close-result]')
+    if (closeTarget) {
       if (
-        element.classList.contains('result-overlay') &&
-        event.target !== event.currentTarget
+        closeTarget.classList.contains('result-overlay')
+        && event.target !== closeTarget
       ) {
         return
       }
       state.resultNotice = null
       render()
-    })
+    }
   })
 }
 
@@ -1278,6 +2166,65 @@ function attachSourceEvents() {
     })
   })
 
+  const matchingForm = document.querySelector('#matching-form')
+  if (matchingForm) {
+    matchingForm.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const formData = new FormData(matchingForm)
+
+      withRefresh(
+        async () => {
+          await createQuestion({
+            type: 'matching',
+            word: String(formData.get('word') || '').trim(),
+            meaning: String(formData.get('meaning') || '').trim(),
+          })
+          matchingForm.reset()
+        },
+        'Đã thêm từ nối vào cơ sở dữ liệu.',
+      )
+    })
+  }
+
+  document.querySelectorAll('[data-delete-source-matching]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.deleteSourceMatching)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion('matching', id)
+        },
+        'Đã xóa từ nối.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-edit-source-matching]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = Number(button.dataset.editSourceMatching)
+      if (!id) return
+
+      const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      const word = window.prompt('Từ cột A', item.word)
+      if (word === null) return
+      const meaning = window.prompt('Từ cột B', item.meaning)
+      if (meaning === null) return
+
+      withRefresh(
+        async () => {
+          await updateQuestion('matching', id, {
+            word: word.trim(),
+            meaning: meaning.trim(),
+          })
+        },
+        'Đã cập nhật từ nối.',
+      )
+    })
+  })
+
   const questionForm = document.querySelector('#question-form')
   if (questionForm) {
     questionForm.addEventListener('submit', (event) => {
@@ -1291,6 +2238,47 @@ function attachSourceEvents() {
           questionForm.reset()
         },
         'Đã lưu câu hỏi vào cơ sở dữ liệu.',
+      )
+    })
+  }
+
+  const sharedListQuestionForm = document.querySelector('#shared-list-question-form')
+  if (sharedListQuestionForm) {
+    sharedListQuestionForm.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const formData = new FormData(sharedListQuestionForm)
+      const targetType = String(formData.get('targetType') || 'listing').trim()
+      const prompt = String(formData.get('prompt') || '').trim()
+      const hint = String(formData.get('hint') || '').trim()
+      const answers = parseWritingSampleLines(formData.get('answersText'))
+
+      if (!answers.length) {
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê dùng chung.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      withRefresh(
+        async () => {
+          if (targetType === 'writing') {
+            await createQuestion({
+              type: 'writing',
+              word: prompt,
+              hint,
+              keywords: answers,
+            })
+          } else {
+            await createQuestion({
+              type: 'listing',
+              prompt,
+              hint,
+              answers,
+            })
+          }
+          sharedListQuestionForm.reset()
+        },
+        'Đã lưu câu hỏi liệt kê dùng chung.',
       )
     })
   }
@@ -1334,6 +2322,77 @@ function attachSourceEvents() {
       )
     })
   })
+
+  document.querySelectorAll('[data-delete-shared-list-question]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const token = String(button.dataset.deleteSharedListQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion(questionType === 'writing' ? 'writing' : 'listing', id)
+        },
+        'Đã xóa câu hỏi liệt kê dùng chung.',
+      )
+    })
+  })
+
+  document.querySelectorAll('[data-edit-shared-list-question]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const token = String(button.dataset.editSharedListQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
+      if (!id) return
+
+      const sourceList = questionType === 'writing'
+        ? (state.database.questions.writing || [])
+        : (state.database.questions.listing || [])
+      const item = sourceList.find((entry) => entry.id === id)
+      if (!item) return
+
+      const currentPrompt = questionType === 'writing' ? item.word : item.prompt
+      const currentAnswers = questionType === 'writing' ? item.keywords : item.answers
+
+      const prompt = window.prompt('Nội dung câu hỏi / từ cần định nghĩa', currentPrompt)
+      if (prompt === null) return
+      const hint = window.prompt('Gợi ý', item.hint || '')
+      if (hint === null) return
+      const answersText = window.prompt(
+        'Đáp án mẫu theo dòng (mỗi dòng 1 đáp án)',
+        (currentAnswers || []).join('\n'),
+      )
+      if (answersText === null) return
+
+      const answers = parseWritingSampleLines(answersText)
+      if (!answers.length) {
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê dùng chung.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      withRefresh(
+        async () => {
+          if (questionType === 'writing') {
+            await updateQuestion('writing', id, {
+              word: prompt.trim(),
+              hint: hint.trim(),
+              keywords: answers,
+            })
+          } else {
+            await updateQuestion('listing', id, {
+              prompt: prompt.trim(),
+              hint: hint.trim(),
+              answers,
+            })
+          }
+        },
+        'Đã cập nhật câu hỏi liệt kê dùng chung.',
+      )
+    })
+  })
 }
 
 function attachEvents() {
@@ -1354,7 +2413,12 @@ function render() {
   }
   app.innerHTML = renderCurrentPage()
   attachEvents()
+  scheduleMatchingLinesRender()
 }
+
+window.addEventListener('resize', () => {
+  scheduleMatchingLinesRender()
+})
 
 window.addEventListener('hashchange', async () => {
   state.sourceMessage = ''

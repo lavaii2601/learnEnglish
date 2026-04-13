@@ -80,7 +80,13 @@ function toQuestionType(type) {
   if (type === 'matching') return 'matching'
   if (type === 'fillBlank') return 'fillBlank'
   if (type === 'writing') return 'writing'
+  if (type === 'listing') return 'listing'
   return null
+}
+
+function toWritingKind(value) {
+  if (value === 'listing') return 'listing'
+  return 'writing'
 }
 
 function extractWordFromQuestion(question) {
@@ -163,12 +169,37 @@ function answerProfile(answer) {
   }
 }
 
+function answersShareShape(targetAnswer, candidateAnswer) {
+  const target = answerProfile(targetAnswer)
+  const candidate = answerProfile(candidateAnswer)
+
+  return target.isSingleWord === candidate.isSingleWord
+    && target.isSentenceLike === candidate.isSentenceLike
+}
+
 function questionHints(question) {
   const text = normalizeForCompare(question)
   return {
+    isVocabularyDefinition: text.includes('nghĩa của từ') || text.includes('nghia cua tu') || text.includes('meaning of the word'),
     wantsGrammar: text.includes('ngữ pháp') || text.includes('grammar'),
     wantsSynonym: text.includes('đồng nghĩa') || text.includes('synonym'),
   }
+}
+
+function questionFamily(question, answer) {
+  const hints = questionHints(question)
+  const answerShape = answerProfile(answer)
+
+  if (hints.isVocabularyDefinition) return 'vocabulary_definition'
+  if (hints.wantsGrammar) return 'grammar_sentence'
+  if (hints.wantsSynonym) return 'synonym_word'
+  if (answerShape.isSentenceLike) return 'sentence_like'
+  if (answerShape.isSingleWord) return 'single_word'
+  return 'general'
+}
+
+function sharesQuestionFamily(targetQuestion, targetAnswer, candidateQuestion, candidateAnswer) {
+  return questionFamily(targetQuestion, targetAnswer) === questionFamily(candidateQuestion, candidateAnswer)
 }
 
 function distractorScore(targetAnswer, targetQuestion, candidateAnswer, candidateQuestion) {
@@ -208,7 +239,17 @@ function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
       .map((row) => [normalizeForCompare(row.answer), row]),
   ).values()]
 
-  const scoredCandidates = uniqueCandidates
+  const sameFamilyCandidates = uniqueCandidates.filter((row) => sharesQuestionFamily(
+    currentQuestion,
+    currentAnswer,
+    row.question,
+    row.answer,
+  ))
+  const sameShapeCandidates = uniqueCandidates.filter((row) => answersShareShape(currentAnswer, row.answer))
+  const candidatePool = [...sameFamilyCandidates, ...sameShapeCandidates, ...uniqueCandidates]
+    .filter((row, index, items) => index === items.findIndex((candidate) => normalizeForCompare(candidate.answer) === normalizeForCompare(row.answer)))
+
+  const scoredCandidates = candidatePool
     .map((row) => ({
       answer: row.answer,
       score: distractorScore(currentAnswer, currentQuestion, row.answer, row.question),
@@ -219,10 +260,6 @@ function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
   const pickedDistractors = shuffleList(shortlist)
     .slice(0, 3)
     .map((item) => item.answer)
-
-  while (pickedDistractors.length < 3) {
-    pickedDistractors.push(`Phương án nhiễu ${pickedDistractors.length + 1}`)
-  }
 
   return shuffleList([currentAnswer, ...pickedDistractors])
 }
@@ -271,7 +308,7 @@ async function fetchFillRows() {
 async function fetchWritingRows() {
   const { data, error } = await supabase
     .from('writing_questions')
-    .select('id, word, hint, keywords')
+    .select('id, word, hint, keywords, kind')
     .order('id', { ascending: false })
   assertNoSupabaseError(error, 'Không thể tải câu hỏi viết')
   return data || []
@@ -356,14 +393,26 @@ async function seedIfEmpty() {
         word: 'resilient',
         hint: 'Viết định nghĩa bằng tiếng Anh và thêm một ví dụ.',
         keywords: ['recover', 'difficult', 'strong'],
+        kind: 'writing',
       },
       {
         word: 'innovative',
         hint: 'Định nghĩa từ và nhắc đến ý tưởng hoặc phương pháp mới.',
         keywords: ['new', 'idea', 'method'],
+        kind: 'writing',
       },
     ]))
     assertNoSupabaseError(error, 'Không thể seed câu hỏi viết')
+
+    ;({ error } = await supabase.from('writing_questions').insert([
+      {
+        word: 'Liệt kê 3 lợi ích của việc đọc sách mỗi ngày.',
+        hint: 'Viết ngắn gọn, mỗi dòng một ý.',
+        keywords: ['improves vocabulary', 'reduces stress', 'expands knowledge'],
+        kind: 'listing',
+      },
+    ]))
+    assertNoSupabaseError(error, 'Không thể seed câu hỏi liệt kê')
   }
 
   if (fillTotal === 0) {
@@ -397,7 +446,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     mcqRows,
     matchingRows,
     fillRows,
-    writingRows,
+    writingRowsRaw,
   ] = await Promise.all([
     fetchVocabularyRows(),
     fetchMcqRows(),
@@ -406,14 +455,13 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     fetchWritingRows(),
   ])
 
-  const vocabularyDefinitions = vocabularyRows
-    .map((row) => String(row.definition || '').trim())
-    .filter(Boolean)
+  const writingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) !== 'listing')
+  const listingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'listing')
 
-  const allMcqAnswerRows = mcqRows
+  const vocabularyAnswerRows = vocabularyRows
     .map((row) => ({
-      answer: String(row.answer || '').trim(),
-      question: String(row.question || '').trim(),
+      answer: String(row.definition || '').trim(),
+      question: `Nghĩa của từ "${row.word}" là gì?`,
     }))
     .filter((row) => row.answer)
 
@@ -425,33 +473,34 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     source: 'vocabulary',
   }))
 
-  const questionMcqRows = mcqRows.map((row) => ({
-    id: row.id,
-    question: row.question,
-    answer: row.answer,
-    mode: toMcqMode(row.mode),
-    source: 'question',
+  const questionMcqRows = mcqRows
+    .map((row) => ({
+      id: row.id,
+      question: row.question,
+      answer: row.answer,
+      mode: toMcqMode(row.mode),
+      source: 'question',
+    }))
+
+  const questionMcqAnswerRows = questionMcqRows.map((row) => ({
+    answer: String(row.answer || '').trim(),
+    question: String(row.question || '').trim(),
   }))
 
-  let mcqExerciseRows = []
-  if (mcqSourceMode === 'vocabulary') {
-    mcqExerciseRows = vocabularyMcqRows
-  }
-  if (mcqSourceMode === 'question') {
-    mcqExerciseRows = questionMcqRows
-  }
-  if (mcqSourceMode === 'mix') {
-    mcqExerciseRows = [...questionMcqRows, ...vocabularyMcqRows]
-  }
+  const mcqVocabularyRows = vocabularyMcqRows
 
-  mcqExerciseRows = shuffleList(mcqExerciseRows)
+  const mcqQuestionRows = questionMcqRows
 
-  const combinedAnswerRows = mcqExerciseRows
-    .map((row) => ({
-      answer: String(row.answer || '').trim(),
-      question: String(row.question || '').trim(),
-    }))
-    .filter((row) => row.answer)
+  const mcqExerciseRows = mcqSourceMode === 'vocabulary'
+    ? mcqVocabularyRows
+    : mcqSourceMode === 'question'
+      ? mcqQuestionRows
+      : [...mcqQuestionRows, ...mcqVocabularyRows]
+
+  const shuffledMcqExerciseRows = shuffleList(mcqExerciseRows)
+
+  const vocabularyExerciseAnswerRows = vocabularyAnswerRows
+  const questionExerciseAnswerRows = questionMcqAnswerRows
 
   return {
     vocabulary: vocabularyRows,
@@ -460,25 +509,18 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         id: row.id,
         question: row.question,
         mode: toMcqMode(row.mode),
-        options:
-          toMcqMode(row.mode) === 'vocabulary_definition'
-            ? createMcqOptions(row.answer, vocabularyDefinitions.map((answer) => ({ answer, question: '' })), row.question)
-            : createMcqOptions(row.answer, allMcqAnswerRows, row.question),
+        options: createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
         answer: row.answer,
       })),
-      mcqExercise: mcqExerciseRows.map((row) => ({
+      mcqExercise: shuffledMcqExerciseRows.map((row) => ({
         id: row.id,
         question: row.question,
         mode: row.mode,
         source: row.source,
         options:
-          row.mode === 'vocabulary_definition'
-            ? createMcqOptions(
-              row.answer,
-              vocabularyDefinitions.map((answer) => ({ answer, question: '' })),
-              row.question,
-            )
-            : createMcqOptions(row.answer, combinedAnswerRows, row.question),
+          row.source === 'vocabulary'
+            ? createMcqOptions(row.answer, vocabularyExerciseAnswerRows, row.question)
+            : createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
         answer: row.answer,
       })),
       matching: matchingRows,
@@ -488,6 +530,12 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         word: row.word,
         hint: row.hint,
         keywords: Array.isArray(row.keywords) ? row.keywords : [],
+      })),
+      listing: listingRows.map((row) => ({
+        id: row.id,
+        prompt: row.word,
+        hint: row.hint,
+        answers: Array.isArray(row.keywords) ? row.keywords : [],
       })),
     },
   }
@@ -602,26 +650,98 @@ app.post('/api/vocabulary/:id/delete', async (req, res, next) => {
 
 app.post('/api/questions', async (req, res, next) => {
   try {
-    const questionText = String(req.body.question || '').trim()
-    const answerText = String(req.body.answer || '').trim()
-    const question = questionText
-    const answer = answerText
-    if (!question || !answer) {
-      return res.status(400).json({ message: 'Dữ liệu câu hỏi trắc nghiệm không hợp lệ' })
+    const type = toQuestionType(req.body.type || 'mcq')
+
+    if (type === 'mcq') {
+      const question = String(req.body.question || '').trim()
+      const answer = String(req.body.answer || '').trim()
+      if (!question || !answer) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi trắc nghiệm không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('mcq_questions').insert([
+        {
+          question,
+          option_a: '',
+          option_b: '',
+          option_c: '',
+          option_d: '',
+          mode: 'general',
+          answer,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
     }
 
-    const { error } = await supabase.from('mcq_questions').insert([
-      {
-        question,
-        option_a: '',
-        option_b: '',
-        option_c: '',
-        option_d: '',
-        mode: 'general',
-        answer,
-      },
-    ])
-    assertNoSupabaseError(error, 'Không thể thêm câu hỏi trắc nghiệm')
+    if (type === 'matching') {
+      const word = String(req.body.word || '').trim()
+      const meaning = String(req.body.meaning || '').trim()
+
+      if (!word || !meaning) {
+        return res.status(400).json({ message: 'Dữ liệu bài nối từ không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('matching_questions').insert([
+        {
+          word,
+          meaning,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi nối từ')
+    }
+
+    if (type === 'writing') {
+      const word = String(req.body.word || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const keywords = Array.isArray(req.body.keywords)
+        ? req.body.keywords
+          .map((line) => String(line || '').trim())
+          .filter(Boolean)
+        : []
+
+      if (!word || !hint || !keywords.length) {
+        return res.status(400).json({ message: 'Dữ liệu bài viết không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('writing_questions').insert([
+        {
+          word,
+          hint,
+          keywords,
+          kind: 'writing',
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm đề viết')
+    }
+
+    if (type === 'listing') {
+      const prompt = String(req.body.prompt || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answers = Array.isArray(req.body.answers)
+        ? req.body.answers
+          .map((line) => String(line || '').trim())
+          .filter(Boolean)
+        : []
+
+      if (!prompt || !answers.length) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi liệt kê không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('writing_questions').insert([
+        {
+          word: prompt,
+          hint,
+          keywords: answers,
+          kind: 'listing',
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi liệt kê')
+    }
+
+    if (!type) {
+      return res.status(400).json({ message: 'Loại câu hỏi không hợp lệ' })
+    }
+
     clearDatabaseResponseCache()
 
     return res.status(201).json({ ok: true })
@@ -707,9 +827,30 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
       }
       const { error } = await supabase
         .from('writing_questions')
-        .update({ word, hint, keywords })
+        .update({ word, hint, keywords, kind: 'writing' })
         .eq('id', id)
       assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi viết')
+      clearDatabaseResponseCache()
+    }
+
+    if (type === 'listing') {
+      const prompt = String(req.body.prompt || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answers = Array.isArray(req.body.answers)
+        ? req.body.answers
+          .map((line) => String(line || '').trim())
+          .filter(Boolean)
+        : []
+
+      if (!prompt || !answers.length) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi liệt kê không hợp lệ' })
+      }
+
+      const { error } = await supabase
+        .from('writing_questions')
+        .update({ word: prompt, hint, keywords: answers, kind: 'listing' })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi liệt kê')
       clearDatabaseResponseCache()
     }
 
@@ -750,6 +891,12 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
       clearDatabaseResponseCache()
     }
 
+    if (type === 'listing') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
+      clearDatabaseResponseCache()
+    }
+
     return res.json({ ok: true })
   } catch (error) {
     next(error)
@@ -784,6 +931,12 @@ app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
     if (type === 'writing') {
       const { error } = await supabase.from('writing_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
+      clearDatabaseResponseCache()
+    }
+
+    if (type === 'listing') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
       clearDatabaseResponseCache()
     }
 
