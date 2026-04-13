@@ -1,0 +1,22 @@
+{
+  "name": "learnEnglish-root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "npm --prefix learnEnglish-master/learnEnglish-master install",
+    "build": "npm --prefix learnEnglish-master/learnEnglish-master run build && node --input-type=module -e \"import fs from 'node:fs'; import path from 'node:path'; fs.rmSync('dist', { recursive: true, force: true }); fs.cpSync(path.join('learnEnglish-master', 'learnEnglish-master', 'dist'), 'dist', { recursive: true });\"",
+    "dev": "npm --prefix learnEnglish-master/learnEnglish-master run dev",
+    "preview": "npm --prefix learnEnglish-master/learnEnglish-master run preview",
+    "start:api": "npm --prefix learnEnglish-master/learnEnglish-master run start:api"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "vite": "^8.0.4"
+  }
+}
