@@ -71,6 +71,7 @@ const state = {
   mcqNextPromptOpen: false,
   mcqReviewOpen: false,
   mcqWrongQuestions: [],
+  editDialog: null,
   databaseCache: {},
   listingPreparedDirty: true,
   listingPreparedCacheItems: [],
@@ -596,6 +597,207 @@ function pickEncouragement() {
   state.encouragementText = ENCOURAGEMENT_TEXTS[Math.floor(Math.random() * ENCOURAGEMENT_TEXTS.length)]
 }
 
+function closeEditDialog() {
+  state.editDialog = null
+  render()
+}
+
+function openEditDialog(dialog) {
+  state.editDialog = dialog
+  render()
+}
+
+function getEditDialogTitle(dialog) {
+  switch (dialog?.kind) {
+    case 'vocab':
+      return 'Sửa từ vựng'
+    case 'matching':
+      return 'Sửa từ nối'
+    case 'mcq':
+      return 'Sửa câu hỏi trắc nghiệm'
+    case 'fillBlank':
+      return 'Sửa câu điền chỗ trống'
+    case 'writing':
+      return 'Sửa đề viết định nghĩa'
+    case 'listing':
+      return 'Sửa câu hỏi liệt kê'
+    default:
+      return 'Sửa dữ liệu'
+  }
+}
+
+function getEditDialogActionLabel(dialog) {
+  switch (dialog?.kind) {
+    case 'vocab':
+      return 'Lưu từ vựng'
+    case 'matching':
+      return 'Lưu từ nối'
+    case 'mcq':
+      return 'Lưu câu hỏi'
+    case 'fillBlank':
+      return 'Lưu câu điền chỗ trống'
+    case 'writing':
+      return 'Lưu đề viết'
+    case 'listing':
+      return 'Lưu câu liệt kê'
+    default:
+      return 'Lưu thay đổi'
+  }
+}
+
+function renderEditDialog() {
+  const dialog = state.editDialog
+  if (!dialog) return ''
+
+  const title = getEditDialogTitle(dialog)
+  const actionLabel = getEditDialogActionLabel(dialog)
+
+  let bodyMarkup = ''
+  if (dialog.kind === 'vocab') {
+    bodyMarkup = `
+      <label>Từ<input name="word" required value="${escapeHtml(dialog.word || '')}" /></label>
+      <label>Định nghĩa<textarea name="definition" required rows="4">${escapeHtml(dialog.definition || '')}</textarea></label>
+      <label>Ví dụ<textarea name="example" rows="3">${escapeHtml(dialog.example || '')}</textarea></label>
+    `
+  }
+
+  if (dialog.kind === 'matching') {
+    bodyMarkup = `
+      <label>Từ cột A<input name="word" required value="${escapeHtml(dialog.word || '')}" /></label>
+      <label>Từ cột B<textarea name="meaning" required rows="4">${escapeHtml(dialog.meaning || '')}</textarea></label>
+    `
+  }
+
+  if (dialog.kind === 'mcq') {
+    bodyMarkup = `
+      <label>Câu hỏi<textarea name="question" required rows="4">${escapeHtml(dialog.question || '')}</textarea></label>
+      <label>Đáp án đúng<textarea name="answer" required rows="3">${escapeHtml(dialog.answer || '')}</textarea></label>
+    `
+  }
+
+  if (dialog.kind === 'fillBlank') {
+    bodyMarkup = `
+      <label>Câu có chỗ trống<textarea name="sentence" required rows="4">${escapeHtml(dialog.sentence || '')}</textarea></label>
+      <label>Đáp án đúng<textarea name="answer" required rows="3">${escapeHtml(dialog.answer || '')}</textarea></label>
+    `
+  }
+
+  if (dialog.kind === 'writing') {
+    bodyMarkup = `
+      <label>Từ cần định nghĩa<input name="word" required value="${escapeHtml(dialog.word || '')}" /></label>
+      <label>Gợi ý<textarea name="hint" rows="3">${escapeHtml(dialog.hint || '')}</textarea></label>
+      <label>Đáp án mẫu theo dòng<textarea name="answersText" required rows="5">${escapeHtml((dialog.keywords || []).join('\n'))}</textarea></label>
+    `
+  }
+
+  if (dialog.kind === 'listing') {
+    bodyMarkup = `
+      <label>Nội dung câu hỏi<textarea name="prompt" required rows="4">${escapeHtml(dialog.prompt || '')}</textarea></label>
+      <label>Gợi ý<textarea name="hint" rows="3">${escapeHtml(dialog.hint || '')}</textarea></label>
+      <label>Đáp án mẫu theo dòng<textarea name="answersText" required rows="5">${escapeHtml((dialog.answers || []).join('\n'))}</textarea></label>
+    `
+  }
+
+  return `
+    <div class="edit-overlay" data-close-edit-dialog="true">
+      <section class="edit-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+        <h3>${escapeHtml(title)}</h3>
+        <p class="muted">Chỉnh sửa dữ liệu trực tiếp trong popup, sau đó lưu để cập nhật ngay.</p>
+        <form data-edit-dialog-form>
+          <input type="hidden" name="kind" value="${escapeHtml(dialog.kind)}" />
+          <input type="hidden" name="id" value="${escapeHtml(String(dialog.id || ''))}" />
+          <input type="hidden" name="questionType" value="${escapeHtml(dialog.questionType || '')}" />
+          <div class="edit-form-grid">
+            ${bodyMarkup}
+          </div>
+          <div class="edit-dialog-actions">
+            <button type="button" class="small-btn" data-close-edit-dialog="true">Hủy</button>
+            <button type="submit" class="action-btn">${escapeHtml(actionLabel)}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `
+}
+
+async function submitEditDialog(formData) {
+  const kind = String(formData.get('kind') || '').trim()
+  const id = Number(formData.get('id'))
+  if (!kind || !id) return false
+
+  if (kind === 'vocab') {
+    const word = String(formData.get('word') || '').trim()
+    const definition = String(formData.get('definition') || '').trim()
+    const example = String(formData.get('example') || '').trim()
+    if (!word || !definition) return false
+
+    await updateVocabulary(id, { word, definition, example })
+    state.editDialog = null
+    return true
+  }
+
+  if (kind === 'matching') {
+    const word = String(formData.get('word') || '').trim()
+    const meaning = String(formData.get('meaning') || '').trim()
+    if (!word || !meaning) return false
+
+    await updateQuestion('matching', id, { word, meaning })
+    state.editDialog = null
+    return true
+  }
+
+  if (kind === 'mcq') {
+    const question = String(formData.get('question') || '').trim()
+    const answer = String(formData.get('answer') || '').trim()
+    if (!question || !answer) return false
+
+    await updateQuestion('mcq', id, {
+      mode: 'general',
+      question,
+      answer,
+    })
+    state.editDialog = null
+    return true
+  }
+
+  if (kind === 'fillBlank') {
+    const sentence = String(formData.get('sentence') || '').trim()
+    const answer = String(formData.get('answer') || '').trim()
+    if (!sentence || !answer) return false
+
+    await updateQuestion('fillBlank', id, { sentence, answer })
+    state.editDialog = null
+    return true
+  }
+
+  if (kind === 'writing' || kind === 'listing') {
+    const questionType = String(formData.get('questionType') || kind).trim()
+    const prompt = String(formData.get(kind === 'writing' ? 'word' : 'prompt') || '').trim()
+    const hint = String(formData.get('hint') || '').trim()
+    const answersText = String(formData.get('answersText') || '')
+    const answers = parseWritingSampleLines(answersText)
+    if (!prompt || !answers.length) return false
+
+    if (questionType === 'writing') {
+      await updateQuestion('writing', id, {
+        word: prompt,
+        hint,
+        keywords: answers,
+      })
+    } else {
+      await updateQuestion('listing', id, {
+        prompt,
+        hint,
+        answers,
+      })
+    }
+    state.editDialog = null
+    return true
+  }
+
+  return false
+}
+
 function scoreMcq() {
   let score = 0
   state.mcqQuizQuestions.forEach((item, index) => {
@@ -960,6 +1162,7 @@ function renderLayout(content) {
           </div>
         `
         : ''}
+      ${renderEditDialog()}
     </main>
   `
 }
@@ -1843,6 +2046,36 @@ function attachExerciseEvents() {
     }
   })
 
+  app.addEventListener('submit', async (event) => {
+    const form = event.target
+    if (!(form instanceof HTMLFormElement)) return
+    if (!form.matches('[data-edit-dialog-form]')) return
+
+    event.preventDefault()
+    const formData = new FormData(form)
+
+    try {
+      const updated = await submitEditDialog(formData)
+      if (!updated) {
+        state.sourceMessage = 'Bạn cần điền đủ dữ liệu trước khi lưu.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      clearDatabaseCache()
+      await refreshDatabase({ force: true })
+      resetExerciseState()
+      state.sourceMessage = 'Đã cập nhật dữ liệu.'
+      state.sourceMessageType = 'ok'
+      render()
+    } catch (error) {
+      state.sourceMessage = error.message || 'Có lỗi khi cập nhật dữ liệu.'
+      state.sourceMessageType = 'error'
+      render()
+    }
+  })
+
   app.addEventListener('focusout', (event) => {
     const target = event.target
 
@@ -1901,6 +2134,149 @@ function attachExerciseEvents() {
     if (button?.matches('[data-listing-reset-session]')) {
       resetListingSession((state.database.questions.listing || []).length)
       render()
+      return
+    }
+
+    if (button?.matches('[data-edit-vocab]')) {
+      const id = Number(button.dataset.editVocab)
+      const item = state.database.vocabulary.find((entry) => entry.id === id)
+      if (!item) return
+
+      openEditDialog({
+        kind: 'vocab',
+        id,
+        word: item.word,
+        definition: item.definition,
+        example: item.example || '',
+      })
+      return
+    }
+
+    if (button?.matches('[data-edit-source-matching]')) {
+      const id = Number(button.dataset.editSourceMatching)
+      const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      openEditDialog({
+        kind: 'matching',
+        id,
+        word: item.word,
+        meaning: item.meaning,
+      })
+      return
+    }
+
+    if (button?.matches('[data-edit-question-answer]')) {
+      const id = Number(button.dataset.editQuestionAnswer)
+      const item = (state.database.questions.mcq || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      openEditDialog({
+        kind: 'mcq',
+        id,
+        question: item.question,
+        answer: item.answer,
+      })
+      return
+    }
+
+    if (button?.matches('[data-edit-question]')) {
+      const token = String(button.dataset.editQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
+      if (!questionType || !id) return
+
+      if (questionType === 'mcq') {
+        const item = (state.database.questions.mcq || []).find((entry) => entry.id === id)
+        if (!item) return
+        openEditDialog({
+          kind: 'mcq',
+          id,
+          question: item.question,
+          answer: item.answer,
+        })
+        return
+      }
+
+      if (questionType === 'matching') {
+        const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
+        if (!item) return
+        openEditDialog({
+          kind: 'matching',
+          id,
+          word: item.word,
+          meaning: item.meaning,
+        })
+        return
+      }
+
+      if (questionType === 'fillBlank') {
+        const item = (state.database.questions.fillBlank || []).find((entry) => entry.id === id)
+        if (!item) return
+        openEditDialog({
+          kind: 'fillBlank',
+          id,
+          sentence: item.sentence,
+          answer: item.answer,
+        })
+        return
+      }
+
+      if (questionType === 'writing' || questionType === 'listing') {
+        const sourceList = questionType === 'writing'
+          ? (state.database.questions.writing || [])
+          : (state.database.questions.listing || [])
+        const item = sourceList.find((entry) => entry.id === id)
+        if (!item) return
+
+        openEditDialog({
+          kind: questionType,
+          id,
+          questionType,
+          ...(questionType === 'writing'
+            ? {
+              word: item.word,
+              hint: item.hint || '',
+              keywords: item.keywords || [],
+            }
+            : {
+              prompt: item.prompt,
+              hint: item.hint || '',
+              answers: item.answers || [],
+            }),
+        })
+      }
+      return
+    }
+
+    if (button?.matches('[data-edit-shared-list-question]')) {
+      const token = String(button.dataset.editSharedListQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
+      if (!questionType || !id) return
+
+      const sourceList = questionType === 'writing'
+        ? (state.database.questions.writing || [])
+        : (state.database.questions.listing || [])
+      const item = sourceList.find((entry) => entry.id === id)
+      if (!item) return
+
+      openEditDialog({
+        kind: questionType,
+        id,
+        questionType,
+        ...(questionType === 'writing'
+          ? {
+            word: item.word,
+            hint: item.hint || '',
+            keywords: item.keywords || [],
+          }
+          : {
+            prompt: item.prompt,
+            hint: item.hint || '',
+            answers: item.answers || [],
+          }),
+      })
       return
     }
 
@@ -2037,6 +2413,17 @@ function attachExerciseEvents() {
       }
       state.resultNotice = null
       render()
+    }
+
+    const closeEditTarget = target.closest('[data-close-edit-dialog]')
+    if (closeEditTarget) {
+      if (
+        closeEditTarget.classList.contains('edit-overlay')
+        && event.target !== closeEditTarget
+      ) {
+        return
+      }
+      closeEditDialog()
     }
   })
 }
