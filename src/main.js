@@ -731,7 +731,7 @@ function scoreListing() {
         }
       })
 
-      const isCorrect = bestRatio >= LISTING_MATCH_THRESHOLD
+      const isCorrect = bestRatio > 0
       if (isCorrect && bestUserIndex >= 0) {
         usedUserIndexes.add(bestUserIndex)
       }
@@ -1440,6 +1440,8 @@ function renderListingPage() {
   const allChecked = totalCount > 0 && checkedCount === totalCount
   const maxSelectable = Math.min(5, Math.max(1, items.length || 1))
   const currentSelectable = Math.min(maxSelectable, Math.max(1, state.listingQuestionCount || 1))
+  const totalCorrectCount = scores.reduce((sum, score) => sum + score.hitCount, 0)
+  const totalItemCount = scores.reduce((sum, score) => sum + score.total, 0)
 
   return `
     <section class="page-card">
@@ -1498,7 +1500,7 @@ function renderListingPage() {
           `
       : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
       <p class="score-line">Đã kiểm tra: <strong>${checkedCount}/${totalCount}</strong> câu</p>
-      <p class="score-line">Câu đạt yêu cầu (>= ${listingThresholdPercent}%): <strong>${correctCount}/${totalCount}</strong></p>
+      <p class="score-line">Tổng ý đúng: <strong>${totalCorrectCount}/${totalItemCount}</strong> ý</p>
     </section>
   `
 }
