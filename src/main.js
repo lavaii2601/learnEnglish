@@ -28,7 +28,12 @@ const state = {
     questions: { mcq: [], matching: [], fillBlank: [], writing: [], listing: [] },
   },
   mcqAnswers: [],
-  matchAnswers: {},
+  matchingQuestionCount: 5,
+  matchingSessionIds: [],
+  matchingRightColumnIds: [],
+  matchingPairs: {},
+  matchingSelectedLeftId: null,
+  matchingChecked: false,
   blankAnswers: [],
   writingAnswers: [],
   listingAnswers: [],
@@ -62,15 +67,13 @@ const state = {
   writingScoreCache: [],
   listingScoreDirty: true,
   listingScoreCache: [],
-  matchingMeaningsDirty: true,
-  matchingMeaningsCache: [],
 }
 
 let renderScheduled = false
 let exerciseEventsBound = false
 
 function isSourceRoute(route) {
-  return route === '/source' || route.startsWith('/source/')
+  return route.startsWith('/source/')
 }
 
 function cloneDatabasePayload(payload) {
@@ -203,7 +206,9 @@ function escapeHtml(value) {
 
 function getRoute() {
   const hash = window.location.hash || '#/home'
-  return hash.replace('#', '')
+  const route = hash.replace('#', '')
+  if (route === '/source') return '/source/vocab'
+  return route
 }
 
 function setRoute(route) {
@@ -352,6 +357,29 @@ function resetListingSession(totalQuestions) {
   state.listingCheckedMap = Array(totalQuestions).fill(false)
 }
 
+function resetMatchingSession(totalQuestions = (state.database.questions.matching || []).length) {
+  const cappedTotal = Math.max(0, Number(totalQuestions) || 0)
+  if (!cappedTotal) {
+    state.matchingSessionIds = []
+    state.matchingRightColumnIds = []
+    state.matchingPairs = {}
+    state.matchingSelectedLeftId = null
+    state.matchingChecked = false
+    return
+  }
+
+  const maxAllowed = Math.min(10, cappedTotal)
+  const selectedCount = Math.min(maxAllowed, Math.max(1, state.matchingQuestionCount || 1))
+  const allIds = getShuffledItems(Array.from({ length: cappedTotal }, (_, index) => state.database.questions.matching[index].id))
+  const selectedIds = allIds.slice(0, selectedCount)
+
+  state.matchingSessionIds = selectedIds
+  state.matchingRightColumnIds = getShuffledItems(selectedIds)
+  state.matchingPairs = {}
+  state.matchingSelectedLeftId = selectedIds[0] || null
+  state.matchingChecked = false
+}
+
 function invalidateScoreCaches() {
   state.writingScoreDirty = true
   state.listingScoreDirty = true
@@ -440,25 +468,36 @@ function resetExerciseState() {
   state.mcqReviewOpen = false
   state.mcqSessionPhase = 'setup'
   state.mcqWrongQuestions = []
-  state.matchAnswers = Object.fromEntries(matching.map((item) => [item.id, '']))
+  resetMatchingSession(matching.length)
   state.blankAnswers = Array(fillBlank.length).fill('')
   state.writingAnswers = Array(writing.length).fill('')
   state.listingAnswers = Array(listing.length).fill('')
   resetListingSession(listing.length)
   state.listingPreparedDirty = true
-  state.matchingMeaningsDirty = true
   invalidateScoreCaches()
 }
 
-function getMatchingMeanings() {
-  if (!state.matchingMeaningsDirty) {
-    return state.matchingMeaningsCache
-  }
-
+function getMatchingSessionItems() {
   const items = state.database.questions.matching || []
-  state.matchingMeaningsCache = getShuffledItems(items.map((item) => item.meaning))
-  state.matchingMeaningsDirty = false
-  return state.matchingMeaningsCache
+  const itemById = new Map(items.map((item) => [String(item.id), item]))
+
+  const leftColumn = state.matchingSessionIds
+    .map((id) => itemById.get(String(id)))
+    .filter(Boolean)
+
+  const rightColumn = state.matchingRightColumnIds
+    .map((id) => itemById.get(String(id)))
+    .filter(Boolean)
+
+  return {
+    leftColumn,
+    rightColumn,
+  }
+}
+
+function isMatchingRoundComplete() {
+  if (!state.matchingSessionIds.length) return false
+  return state.matchingSessionIds.every((id) => Number(state.matchingPairs[id]) > 0)
 }
 
 function scheduleRender() {
@@ -479,11 +518,10 @@ function scoreMcq() {
 }
 
 function scoreMatching() {
-  let score = 0
-  state.database.questions.matching.forEach((item) => {
-    if (state.matchAnswers[item.id] === item.meaning) score += 1
-  })
-  return score
+  return state.matchingSessionIds.reduce((total, leftId) => {
+    const selectedRightId = Number(state.matchingPairs[leftId])
+    return total + (selectedRightId === Number(leftId) ? 1 : 0)
+  }, 0)
 }
 
 function scoreBlanks() {
@@ -677,7 +715,7 @@ function openResultNotice(type) {
 
   if (type === 'matching') {
     correct = scoreMatching()
-    total = state.database.questions.matching.length
+    total = state.matchingSessionIds.length
     title = 'Kết quả nối từ'
   }
 
@@ -718,10 +756,9 @@ function renderLayout(content) {
     '/exercise/fill': 'Điền chỗ trống',
     '/exercise/writing': 'Viết định nghĩa',
     '/exercise/listing': 'Liệt kê ý',
-    '/source': 'Thêm nguồn',
     '/source/vocab': 'Thêm từ vựng',
     '/source/questions': 'Thêm câu hỏi',
-    '/source/matching': 'Thêm nối từ',
+    '/source/matching': 'Thêm từ nối',
   }
 
   const sourceGroupOpen = state.sourceGroupOpen || isSourceRoute(state.route)
@@ -785,10 +822,9 @@ function renderLayout(content) {
           <span class="nav-caret">${sourceGroupOpen ? '▾' : '▸'}</span>
         </button>
         <div class="nav-subgroup ${sourceGroupOpen ? 'open' : ''}">
-          <button class="nav-btn nav-sub-btn ${state.route === '/source' ? 'active' : ''}" data-route="/source">Trang thêm nguồn</button>
           <button class="nav-btn nav-sub-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
           <button class="nav-btn nav-sub-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
-          <button class="nav-btn nav-sub-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching">Nhiệm vụ: Thêm nối từ</button>
+          <button class="nav-btn nav-sub-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching">Nhiệm vụ: Thêm từ nối</button>
         </div>
 
         <button
@@ -876,7 +912,7 @@ function renderLandingPage() {
         <p class="landing-subtitle">Bắt đầu nhanh với bộ bài tập và trang quản lý dữ liệu học tập.</p>
         <div class="landing-actions">
           <button type="button" class="action-btn" data-route="/exercise/mcq">Vào luyện tập</button>
-          <button type="button" class="small-btn" data-route="/source">Quản lý nguồn dữ liệu</button>
+          <button type="button" class="small-btn" data-route="/source/vocab">Quản lý nguồn dữ liệu</button>
         </div>
       </section>
     </main>
@@ -1127,38 +1163,90 @@ function renderMcqPage() {
 
 function renderMatchingPage() {
   const items = state.database.questions.matching
+  const { leftColumn, rightColumn } = getMatchingSessionItems()
   const score = scoreMatching()
-  const meanings = getMatchingMeanings()
+  const maxSelectable = Math.min(10, Math.max(1, items.length || 1))
+  const selectedCount = Math.min(maxSelectable, Math.max(1, state.matchingQuestionCount || 1))
+  const isComplete = isMatchingRoundComplete()
+  const selectedLeftId = Number(state.matchingSelectedLeftId)
+  const rightOwnershipMap = Object.entries(state.matchingPairs).reduce((map, [leftId, rightId]) => {
+    map[String(rightId)] = Number(leftId)
+    return map
+  }, {})
 
   return `
     <section class="page-card">
       <h2>Nối từ</h2>
-      ${items
-        .map(
-          (item) => `
-            <article class="question-card compact">
-              <h3 class="question-title">
-                <span class="question-order">Chọn nghĩa phù hợp</span>
-                <span class="question-text">${escapeHtml(item.word)}</span>
-              </h3>
-              <select data-match-id="${item.id}">
-                <option value="">-- Chọn nghĩa --</option>
-                ${meanings
-                  .map(
-                    (meaning) => `
-                      <option value="${escapeHtml(meaning)}" ${state.matchAnswers[item.id] === meaning ? 'selected' : ''}>
-                        ${escapeHtml(meaning)}
-                      </option>
-                    `,
-                  )
-                  .join('')}
-              </select>
-            </article>
-          `,
-        )
-        .join('')}
-      <p class="score-line">Điểm: <strong>${score}/${items.length}</strong></p>
-      <button type="button" class="action-btn" data-check-result="matching">Kiểm tra kết quả</button>
+      <article class="question-card compact">
+        <label>
+          Số lượng cặp từ muốn nối
+          <select data-matching-question-count>
+            ${Array.from({ length: maxSelectable }, (_, index) => index + 1)
+      .map((value) => `<option value="${value}" ${selectedCount === value ? 'selected' : ''}>${value} cặp</option>`)
+      .join('')}
+          </select>
+        </label>
+        <button type="button" class="small-btn" data-matching-reset-session>Random bộ nối mới</button>
+      </article>
+
+      ${leftColumn.length
+      ? `
+          <article class="question-card">
+            <p class="muted">Bấm 1 từ ở cột A, sau đó bấm 1 từ ở cột B để nối.</p>
+            <div class="matching-board">
+              <section class="matching-column">
+                <h3>Cột A</h3>
+                ${leftColumn
+      .map((item) => {
+        const matchedRightId = Number(state.matchingPairs[item.id])
+        const isSelected = selectedLeftId === Number(item.id)
+        const isMatched = matchedRightId > 0
+        const isCorrect = state.matchingChecked && matchedRightId === Number(item.id)
+        const isWrong = state.matchingChecked && isMatched && matchedRightId !== Number(item.id)
+
+        return `
+                      <button
+                        type="button"
+                        class="matching-item left ${isSelected ? 'selected' : ''} ${isMatched ? 'matched' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}"
+                        data-match-left="${item.id}"
+                      >
+                        ${escapeHtml(item.word)}
+                      </button>
+                    `
+      })
+      .join('')}
+              </section>
+
+              <section class="matching-column">
+                <h3>Cột B</h3>
+                ${rightColumn
+      .map((item) => {
+        const ownerLeftId = Number(rightOwnershipMap[String(item.id)] || 0)
+        const isTaken = ownerLeftId > 0
+        const isSelectedLink = isTaken && ownerLeftId === selectedLeftId
+        const isCorrect = state.matchingChecked && isTaken && ownerLeftId === Number(item.id)
+        const isWrong = state.matchingChecked && isTaken && ownerLeftId !== Number(item.id)
+
+        return `
+                      <button
+                        type="button"
+                        class="matching-item right ${isTaken ? 'matched' : ''} ${isSelectedLink ? 'selected-link' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}"
+                        data-match-right="${item.id}"
+                      >
+                        ${escapeHtml(item.meaning)}
+                      </button>
+                    `
+      })
+      .join('')}
+              </section>
+            </div>
+          </article>
+
+          <p class="score-line">Đã nối: <strong>${Object.keys(state.matchingPairs).length}/${leftColumn.length}</strong> cặp</p>
+          ${isComplete ? '<button type="button" class="action-btn" data-matching-check-result>Kiểm tra kết quả</button>' : '<p class="muted">Nối đủ tất cả cặp để hiện nút kiểm tra kết quả.</p>'}
+          ${state.matchingChecked ? `<p class="score-line">Kết quả: <strong>${score}/${leftColumn.length}</strong> cặp đúng</p>` : ''}
+        `
+      : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
     </section>
   `
 }
@@ -1295,41 +1383,20 @@ function renderListingPage() {
   `
 }
 
-function renderSourceHome() {
-  return `
-    <section class="page-card">
-      <h2>Thêm nguồn</h2>
-      <p>Bạn có 3 nhiệm vụ riêng:</p>
-      <div class="action-grid">
-        <button class="action-btn" data-route="/source/vocab">Nhiệm vụ 1: Thêm từ vựng</button>
-        <button class="action-btn" data-route="/source/questions">Nhiệm vụ 2: Thêm câu hỏi + câu trả lời</button>
-        <button class="action-btn" data-route="/source/matching">Nhiệm vụ 3: Thêm nối từ</button>
-      </div>
-      <h3>Từ vựng gần đây</h3>
-      <ul class="list-view">
-        ${state.database.vocabulary
-          .slice(0, 6)
-          .map((item) => `<li><strong>${escapeHtml(item.word)}:</strong> ${escapeHtml(item.definition)}</li>`)
-          .join('')}
-      </ul>
-    </section>
-  `
-}
-
 function renderSourceMatching() {
   const matchingList = state.database.questions.matching || []
 
   return `
     <section class="page-card">
-      <h2>Nhiệm vụ: Thêm nối từ</h2>
+      <h2>Nhiệm vụ: Thêm từ nối</h2>
       <form id="matching-form" class="stack-form">
-        <p class="muted">Thêm cặp từ và nghĩa để dùng cho bài tập nối từ.</p>
-        <label>Từ tiếng Anh<input name="word" required placeholder="diligent" /></label>
-        <label>Nghĩa tiếng Anh<input name="meaning" required placeholder="hard-working and careful" /></label>
-        <button type="submit">Lưu cặp nối từ vào cơ sở dữ liệu</button>
+        <p class="muted">Thêm cặp từ nối theo 2 cột A và B để dùng cho bài tập nối từ.</p>
+        <label>Từ cột A<input name="word" required placeholder="diligent" /></label>
+        <label>Từ cột B<input name="meaning" required placeholder="hard-working and careful" /></label>
+        <button type="submit">Lưu từ nối vào cơ sở dữ liệu</button>
       </form>
 
-      <h3>Quản lý nối từ (sửa/xóa)</h3>
+      <h3>Quản lý từ nối (sửa/xóa)</h3>
       <div class="manage-list">
         ${matchingList.length
           ? matchingList
@@ -1337,8 +1404,8 @@ function renderSourceMatching() {
               (item) => `
                 <article class="manage-card">
                   <div>
-                    <strong>${escapeHtml(item.word)}</strong>
-                    <p>${escapeHtml(item.meaning)}</p>
+                    <p><strong>Cột A:</strong> ${escapeHtml(item.word)}</p>
+                    <p><strong>Cột B:</strong> ${escapeHtml(item.meaning)}</p>
                   </div>
                   <div class="row-actions">
                     <button class="small-btn" data-edit-source-matching="${item.id}">Sửa</button>
@@ -1348,7 +1415,7 @@ function renderSourceMatching() {
               `,
             )
             .join('')
-          : '<p class="muted">Chưa có cặp nối từ nào.</p>'}
+          : '<p class="muted">Chưa có cặp từ nối nào.</p>'}
       </div>
 
       ${renderSourceMessage()}
@@ -1575,7 +1642,6 @@ function renderCurrentPage() {
   if (state.route === '/exercise/fill') return renderLayout(renderFillPage())
   if (state.route === '/exercise/writing') return renderLayout(renderWritingPage())
   if (state.route === '/exercise/listing') return renderLayout(renderListingPage())
-  if (state.route === '/source') return renderLayout(renderSourceHome())
   if (state.route === '/source/vocab') return renderLayout(renderSourceVocab())
   if (state.route === '/source/questions') return renderLayout(renderSourceQuestion())
   if (state.route === '/source/matching') return renderLayout(renderSourceMatching())
@@ -1653,16 +1719,18 @@ function attachExerciseEvents() {
       return
     }
 
-    if (target.matches('select[data-match-id]')) {
-      state.matchAnswers[target.dataset.matchId] = target.value
-      scheduleRender()
-      return
-    }
-
     if (target.matches('[data-listing-question-count]')) {
       const nextValue = Number(target.value) || 1
       state.listingQuestionCount = Math.min(5, Math.max(1, nextValue))
       resetListingSession((state.database.questions.listing || []).length)
+      render()
+      return
+    }
+
+    if (target.matches('[data-matching-question-count]')) {
+      const nextValue = Number(target.value) || 1
+      state.matchingQuestionCount = Math.min(10, Math.max(1, nextValue))
+      resetMatchingSession((state.database.questions.matching || []).length)
       render()
       return
     }
@@ -1766,6 +1834,50 @@ function attachExerciseEvents() {
 
     if (button?.matches('[data-listing-reset-session]')) {
       resetListingSession((state.database.questions.listing || []).length)
+      render()
+      return
+    }
+
+    if (button?.matches('[data-matching-reset-session]')) {
+      resetMatchingSession((state.database.questions.matching || []).length)
+      render()
+      return
+    }
+
+    if (button?.matches('[data-match-left]')) {
+      const leftId = Number(button.dataset.matchLeft)
+      if (!leftId) return
+      state.matchingSelectedLeftId = leftId
+      render()
+      return
+    }
+
+    if (button?.matches('[data-match-right]')) {
+      const rightId = Number(button.dataset.matchRight)
+      const selectedLeftId = Number(state.matchingSelectedLeftId)
+      if (!rightId || !selectedLeftId) return
+
+      Object.entries(state.matchingPairs).forEach(([leftId, linkedRightId]) => {
+        if (Number(leftId) !== selectedLeftId && Number(linkedRightId) === rightId) {
+          delete state.matchingPairs[leftId]
+        }
+      })
+
+      state.matchingPairs[selectedLeftId] = rightId
+      state.matchingChecked = false
+
+      const nextUnmatchedLeftId = state.matchingSessionIds
+        .map((id) => Number(id))
+        .find((leftId) => !Number(state.matchingPairs[leftId]))
+      state.matchingSelectedLeftId = nextUnmatchedLeftId || selectedLeftId
+
+      render()
+      return
+    }
+
+    if (button?.matches('[data-matching-check-result]')) {
+      if (!isMatchingRoundComplete()) return
+      state.matchingChecked = true
       render()
       return
     }
@@ -1938,7 +2050,7 @@ function attachSourceEvents() {
           })
           matchingForm.reset()
         },
-        'Đã thêm cặp nối từ vào cơ sở dữ liệu.',
+        'Đã thêm từ nối vào cơ sở dữ liệu.',
       )
     })
   }
@@ -1952,7 +2064,7 @@ function attachSourceEvents() {
         async () => {
           await deleteQuestion('matching', id)
         },
-        'Đã xóa cặp nối từ.',
+        'Đã xóa từ nối.',
       )
     })
   })
@@ -1965,9 +2077,9 @@ function attachSourceEvents() {
       const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
       if (!item) return
 
-      const word = window.prompt('Từ tiếng Anh', item.word)
+      const word = window.prompt('Từ cột A', item.word)
       if (word === null) return
-      const meaning = window.prompt('Nghĩa tiếng Anh', item.meaning)
+      const meaning = window.prompt('Từ cột B', item.meaning)
       if (meaning === null) return
 
       withRefresh(
@@ -1977,7 +2089,7 @@ function attachSourceEvents() {
             meaning: meaning.trim(),
           })
         },
-        'Đã cập nhật cặp nối từ.',
+        'Đã cập nhật từ nối.',
       )
     })
   })

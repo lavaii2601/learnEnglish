@@ -727,6 +727,63 @@ textarea {
   background: #f7fafe;
 }
 
+.matching-board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.matching-column {
+  border: 2px solid #c4cdda;
+  border-radius: 12px;
+  padding: 10px;
+  background: #fbfdff;
+  display: grid;
+  gap: 8px;
+}
+
+.matching-column h3 {
+  margin: 0 0 2px;
+  font-size: 1rem;
+  color: #2f475d;
+}
+
+.matching-item {
+  width: 100%;
+  text-align: left;
+  border: 2px solid #c4cdda;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.matching-item:hover {
+  border-color: #8ea1b7;
+  background: #f4f8fd;
+}
+
+.matching-item.selected,
+.matching-item.selected-link {
+  border-color: #3f5f7b;
+  background: #e9edf2;
+}
+
+.matching-item.matched {
+  border-style: solid;
+}
+
+.matching-item.correct {
+  border-color: #2c9a49;
+  background: #edf9f0;
+}
+
+.matching-item.wrong {
+  border-color: #d14646;
+  background: #fff1f1;
+}
+
 .listing-review-block {
   margin-top: 4px;
   display: grid;
@@ -1022,6 +1079,10 @@ textarea:focus-visible {
 
   .action-grid,
   .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .matching-board {
     grid-template-columns: 1fr;
   }
 
