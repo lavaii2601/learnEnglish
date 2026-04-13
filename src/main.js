@@ -62,7 +62,12 @@ const state = {
   writingScoreCache: [],
   listingScoreDirty: true,
   listingScoreCache: [],
+  matchingMeaningsDirty: true,
+  matchingMeaningsCache: [],
 }
+
+let renderScheduled = false
+let exerciseEventsBound = false
 
 function isSourceRoute(route) {
   return route === '/source' || route.startsWith('/source/')
@@ -420,7 +425,28 @@ function resetExerciseState() {
   state.listingAnswers = Array(listing.length).fill('')
   resetListingSession(listing.length)
   state.listingPreparedDirty = true
+  state.matchingMeaningsDirty = true
   invalidateScoreCaches()
+}
+
+function getMatchingMeanings() {
+  if (!state.matchingMeaningsDirty) {
+    return state.matchingMeaningsCache
+  }
+
+  const items = state.database.questions.matching || []
+  state.matchingMeaningsCache = getShuffledItems(items.map((item) => item.meaning))
+  state.matchingMeaningsDirty = false
+  return state.matchingMeaningsCache
+}
+
+function scheduleRender() {
+  if (renderScheduled) return
+  renderScheduled = true
+  window.requestAnimationFrame(() => {
+    renderScheduled = false
+    render()
+  })
 }
 
 function scoreMcq() {
@@ -608,10 +634,11 @@ function finishMcqSession() {
 
 function openResultNotice(type) {
   if (type === 'mcq' && !isMcqRoundComplete()) {
+    const totalMcqQuestions = state.mcqQuizQuestions.length || state.mcqQuestionCount || 5
     state.resultNotice = {
       type,
       title: 'Chưa hoàn thành bài trắc nghiệm',
-      message: 'Vui lòng trả lời đủ 5 câu trước khi kiểm tra kết quả.',
+      message: `Vui lòng trả lời đủ ${totalMcqQuestions} câu trước khi kiểm tra kết quả.`,
     }
     render()
     return
@@ -803,7 +830,7 @@ function renderLayout(content) {
               <h3>${escapeHtml(state.resultNotice.title)}</h3>
               <p>${escapeHtml(state.resultNotice.message)}</p>
               ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-open-mcq-review>Xem lại đúng/sai</button>' : ''}
-              ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-retry-mcq>Làm bộ 5 câu mới</button>' : ''}
+              ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-retry-mcq>Random bộ mới</button>' : ''}
               <button type="button" class="action-btn" data-close-result="true">Đóng</button>
             </section>
           </div>
@@ -926,6 +953,7 @@ function renderHome() {
 function renderMcqPage() {
   const questions = state.mcqQuizQuestions
   const score = scoreMcq()
+  const answeredCount = state.mcqAnswers.filter((answer) => String(answer || '').trim().length > 0).length
   const availableCount = state.mcqPoolQuestions.length
   const hiddenCorrectCount = state.mcqCorrectQuestionIds.length
   const selectedCount = Math.min(state.mcqQuestionCount, availableCount)
@@ -939,6 +967,7 @@ function renderMcqPage() {
   const sessionCompleted = state.mcqSessionPhase === 'completed'
   const inPlay = state.mcqSessionPhase === 'playing'
   const currentQuestion = questions[state.mcqCurrentIndex]
+  const canSubmit = inPlay && questions.length > 0 && answeredCount === questions.length
 
   const setupPanel = setupVisible
     ? `
@@ -990,6 +1019,7 @@ function renderMcqPage() {
           <span class="question-order">Câu ${state.mcqCurrentIndex + 1}/${questions.length}</span>
           <span class="question-text">${escapeHtml(currentQuestion.question)}</span>
         </h3>
+        <p class="muted">Đã trả lời: <strong>${answeredCount}/${questions.length}</strong> câu. Bạn có thể quay lại câu trước để sửa đáp án.</p>
         <div class="option-grid">
           ${currentQuestion.options
             .map(
@@ -1002,18 +1032,14 @@ function renderMcqPage() {
             )
             .join('')}
         </div>
+        <div class="mcq-complete-actions">
+          <button type="button" class="small-btn" data-mcq-prev ${state.mcqCurrentIndex > 0 ? '' : 'disabled'}>Câu trước</button>
+          <button type="button" class="small-btn" data-mcq-next ${state.mcqCurrentIndex + 1 < questions.length ? '' : 'disabled'}>Câu kế tiếp</button>
+        </div>
+        ${canSubmit
+          ? '<button type="button" class="action-btn" data-check-result="mcq">Kiểm tra kết quả</button>'
+          : '<p class="muted">Nút kiểm tra kết quả sẽ xuất hiện khi bạn trả lời hết tất cả câu hỏi.</p>'}
       </section>
-      ${state.mcqNextPromptOpen
-        ? `
-          <article class="question-card next-question-board">
-            <h3>${state.mcqCurrentIndex + 1 < questions.length ? 'Đã lưu câu trả lời.' : 'Bạn đã hoàn thành bộ câu hỏi.'}</h3>
-            <p>${state.mcqCurrentIndex + 1 < questions.length ? 'Bấm để qua câu kế tiếp.' : 'Bấm để xem kết quả.'}</p>
-            <button type="button" class="action-btn" data-mcq-next>
-              ${state.mcqCurrentIndex + 1 < questions.length ? 'Qua câu kế tiếp' : 'Xem kết quả'}
-            </button>
-          </article>
-        `
-        : ''}
     `
     : ''
 
@@ -1073,8 +1099,7 @@ function renderMcqPage() {
       ${playPanel}
       ${reviewPanel}
       ${sessionCompleted ? `<p class="score-line">Điểm: <strong>${score}/${questions.length}</strong></p>` : ''}
-      ${inPlay ? `<p class="score-line">Điểm tạm thời: <strong>${score}/${questions.length}</strong></p>` : ''}
-      ${inPlay ? `<button type="button" class="small-btn" data-mcq-retry>Kiểm tra lại (random bộ mới)</button>` : ''}
+      ${inPlay ? '<button type="button" class="small-btn" data-mcq-retry>Random bộ mới</button>' : ''}
     </section>
   `
 }
@@ -1082,7 +1107,7 @@ function renderMcqPage() {
 function renderMatchingPage() {
   const items = state.database.questions.matching
   const score = scoreMatching()
-  const meanings = [...items].map((item) => item.meaning).sort(() => Math.random() - 0.5)
+  const meanings = getMatchingMeanings()
 
   return `
     <section class="page-card">
@@ -1592,96 +1617,120 @@ function attachNavEvents() {
 }
 
 function attachExerciseEvents() {
-  document.querySelectorAll('input[type="radio"]').forEach((input) => {
-    input.addEventListener('change', (event) => {
-      const target = event.target
-      if (state.mcqReviewOpen || state.mcqSessionPhase !== 'playing') return
+  if (exerciseEventsBound) return
+  exerciseEventsBound = true
 
-      if (target.name !== 'mcq-current') {
-        const index = Number(target.name.split('-')[1])
-        state.mcqAnswers[index] = target.value
-        render()
-        return
-      }
+  app.addEventListener('change', async (event) => {
+    const target = event.target
+
+    if (target.matches('input[type="radio"]')) {
+      if (state.mcqReviewOpen || state.mcqSessionPhase !== 'playing') return
+      if (target.name !== 'mcq-current') return
 
       state.mcqAnswers[state.mcqCurrentIndex] = target.value
-      state.mcqNextPromptOpen = true
-      render()
-    })
-  })
+      scheduleRender()
+      return
+    }
 
-  document.querySelectorAll('[data-mcq-next]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (state.mcqCurrentIndex + 1 < state.mcqQuizQuestions.length) {
-        state.mcqCurrentIndex += 1
-        state.mcqNextPromptOpen = false
-        render()
-        return
-      }
-
-      state.mcqNextPromptOpen = false
-      finishMcqSession()
-      openResultNotice('mcq')
-    })
-  })
-
-  document.querySelectorAll('select[data-match-id]').forEach((select) => {
-    select.addEventListener('change', (event) => {
-      const target = event.target
+    if (target.matches('select[data-match-id]')) {
       state.matchAnswers[target.dataset.matchId] = target.value
+      scheduleRender()
+      return
+    }
+
+    if (target.matches('[data-listing-question-count]')) {
+      const nextValue = Number(target.value) || 1
+      state.listingQuestionCount = Math.min(5, Math.max(1, nextValue))
+      resetListingSession((state.database.questions.listing || []).length)
       render()
-    })
+      return
+    }
+
+    if (target.matches('[data-mcq-source-mode]')) {
+      state.mcqSourceMode = target.value
+      await loadDataForCurrentRoute()
+      return
+    }
+
+    if (target.matches('[data-mcq-question-count]')) {
+      state.mcqQuestionCount = Number(target.value) || 5
+      render()
+      return
+    }
+
+    if (target.matches('[data-mcq-exclude-correct]')) {
+      state.mcqExcludeCorrectEnabled = Boolean(target.checked)
+      prepareMcqPool()
+      render()
+    }
   })
 
-  document.querySelectorAll('input[data-blank-index]').forEach((input) => {
-    input.addEventListener('input', (event) => {
-      const target = event.target
+  app.addEventListener('input', (event) => {
+    const target = event.target
+
+    if (target.matches('input[data-blank-index]')) {
       state.blankAnswers[Number(target.dataset.blankIndex)] = target.value
-      render()
-    })
-  })
+      scheduleRender()
+      return
+    }
 
-  document.querySelectorAll('textarea[data-writing-index]').forEach((textarea) => {
-    textarea.addEventListener('input', (event) => {
-      const target = event.target
+    if (target.matches('textarea[data-writing-index]')) {
       state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
       state.writingScoreDirty = true
-    })
+      return
+    }
 
-    textarea.addEventListener('blur', (event) => {
-      const target = event.target
-      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
-      render()
-    })
-  })
-
-  document.querySelectorAll('textarea[data-listing-index]').forEach((textarea) => {
-    textarea.addEventListener('input', (event) => {
-      const target = event.target
+    if (target.matches('textarea[data-listing-index]')) {
       const index = Number(target.dataset.listingIndex)
       state.listingAnswers[index] = target.value
       state.listingCheckedMap[index] = false
       state.listingScoreDirty = true
-    })
+    }
+  })
 
-    textarea.addEventListener('blur', (event) => {
-      const target = event.target
+  app.addEventListener('focusout', (event) => {
+    const target = event.target
+
+    if (target.matches('textarea[data-writing-index]')) {
+      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
+      render()
+      return
+    }
+
+    if (target.matches('textarea[data-listing-index]')) {
       state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
       render()
-    })
+    }
   })
 
-  document.querySelectorAll('[data-listing-check-current]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
-      const index = activeIndex
-      state.listingCheckedMap[index] = true
+  app.addEventListener('click', (event) => {
+    const target = event.target
+    const button = target.closest('button')
+
+    if (button?.matches('[data-mcq-prev]')) {
+      if (state.mcqCurrentIndex <= 0) return
+      state.mcqCurrentIndex -= 1
+      state.mcqNextPromptOpen = false
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-listing-next-question]').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (button?.matches('[data-mcq-next]')) {
+      if (state.mcqCurrentIndex + 1 >= state.mcqQuizQuestions.length) return
+      state.mcqCurrentIndex += 1
+      state.mcqNextPromptOpen = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-listing-check-current]')) {
+      const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
+      state.listingCheckedMap[activeIndex] = true
+      render()
+      return
+    }
+
+    if (button?.matches('[data-listing-next-question]')) {
       const uncheckedIndexes = state.listingSessionIndexes
         .filter((index) => !state.listingCheckedMap[index])
 
@@ -1691,130 +1740,90 @@ function attachExerciseEvents() {
       const nextQuestionIndex = uncheckedIndexes[randomIndex]
       state.listingCurrentIndex = state.listingSessionIndexes.findIndex((index) => index === nextQuestionIndex)
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-listing-question-count]').forEach((select) => {
-    select.addEventListener('change', (event) => {
-      const target = event.target
-      const nextValue = Number(target.value) || 1
-      state.listingQuestionCount = Math.min(5, Math.max(1, nextValue))
+    if (button?.matches('[data-listing-reset-session]')) {
       resetListingSession((state.database.questions.listing || []).length)
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-listing-reset-session]').forEach((button) => {
-    button.addEventListener('click', () => {
-      resetListingSession((state.database.questions.listing || []).length)
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-mcq-source-mode]').forEach((select) => {
-    select.addEventListener('change', async (event) => {
-      const target = event.target
-      state.mcqSourceMode = target.value
-      await loadDataForCurrentRoute()
-    })
-  })
-
-  document.querySelectorAll('[data-mcq-question-count]').forEach((select) => {
-    select.addEventListener('change', (event) => {
-      const target = event.target
-      state.mcqQuestionCount = Number(target.value) || 5
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-mcq-start]').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (button?.matches('[data-mcq-start]')) {
+      state.resultNotice = null
       startMcqQuizRound(false)
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-mcq-exclude-correct]').forEach((checkbox) => {
-    checkbox.addEventListener('change', (event) => {
-      const target = event.target
-      state.mcqExcludeCorrectEnabled = Boolean(target.checked)
-      prepareMcqPool()
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-mcq-clear-correct]').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (button?.matches('[data-mcq-clear-correct]')) {
       state.mcqCorrectQuestionIds = []
       prepareMcqPool()
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-mcq-retry-wrong]').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (button?.matches('[data-mcq-retry-wrong]')) {
       startMcqQuizRound(true)
       render()
-    })
-  })
+      return
+    }
 
-  document.querySelectorAll('[data-check-result]').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (button?.matches('[data-mcq-retry]') || button?.matches('[data-retry-mcq]')) {
+      state.resultNotice = null
+
+      prepareMcqPool()
+      if (!state.mcqPoolQuestions.length) {
+        state.mcqSessionPhase = 'setup'
+        render()
+        return
+      }
+
+      startMcqQuizRound(false)
+      render()
+      return
+    }
+
+    if (button?.matches('[data-open-mcq-review]')) {
+      state.resultNotice = null
+      state.mcqReviewOpen = true
+      render()
+      return
+    }
+
+    if (button?.matches('[data-close-mcq-review]')) {
+      state.mcqReviewOpen = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-check-result]')) {
       const type = button.dataset.checkResult
       if (!type) return
       if (type === 'mcq' && !isMcqRoundComplete()) {
         openResultNotice('mcq')
         return
       }
-      openResultNotice(type)
-    })
-  })
 
-  document.querySelectorAll('[data-mcq-retry]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      state.resultNotice = null
-      if (state.mcqSessionPhase === 'completed' && state.mcqWrongQuestions.length) {
-        startMcqQuizRound(true)
-        render()
-        return
+      if (type === 'mcq' && state.mcqSessionPhase === 'playing') {
+        finishMcqSession()
       }
-      await loadDataForCurrentRoute()
-    })
-  })
 
-  document.querySelectorAll('[data-open-mcq-review]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.resultNotice = null
-      state.mcqReviewOpen = true
-      render()
-    })
-  })
+      openResultNotice(type)
+      return
+    }
 
-  document.querySelectorAll('[data-close-mcq-review]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.mcqReviewOpen = false
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-retry-mcq]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      state.resultNotice = null
-      await loadDataForCurrentRoute()
-    })
-  })
-
-  document.querySelectorAll('[data-close-result]').forEach((element) => {
-    element.addEventListener('click', (event) => {
+    const closeTarget = target.closest('[data-close-result]')
+    if (closeTarget) {
       if (
-        element.classList.contains('result-overlay') &&
-        event.target !== event.currentTarget
+        closeTarget.classList.contains('result-overlay')
+        && event.target !== closeTarget
       ) {
         return
       }
       state.resultNotice = null
       render()
-    })
+    }
   })
 }
 
