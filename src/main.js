@@ -385,15 +385,36 @@ function pickMixedQuizItems(pool, maxCount) {
   return getShuffledItems(picked)
 }
 
-function startMcqQuizRound(useWrongOnly = false) {
-  const source = useWrongOnly && state.mcqWrongQuestions?.length
-    ? state.mcqWrongQuestions
+function getMcqItemKey(item) {
+  const id = normalizeMcqQuestionId(item?.id)
+  if (id) return `id:${id}`
+  return `qa:${normalizeText(item?.question || '')}::${normalizeText(item?.answer || '')}`
+}
+
+function startMcqQuizRound(options = {}) {
+  const {
+    useWrongOnly = false,
+    appendWrongQuestions = false,
+    wrongQuestions = state.mcqWrongQuestions,
+  } = options
+
+  const wrongList = Array.isArray(wrongQuestions) ? wrongQuestions : []
+  const basePool = useWrongOnly && wrongList.length
+    ? wrongList
     : state.mcqPoolQuestions
-  const pool = Array.isArray(source) ? source : []
+  const pool = Array.isArray(basePool) ? basePool : []
   const maxCount = Math.min(state.mcqQuestionCount || 5, pool.length)
-  const quizItems = state.mcqSourceMode === 'mix'
+  const baseQuizItems = state.mcqSourceMode === 'mix'
     ? pickMixedQuizItems(pool, maxCount)
     : getShuffledItems(pool).slice(0, maxCount)
+  const baseKeySet = new Set(baseQuizItems.map((entry) => getMcqItemKey(entry)))
+
+  const quizItems = appendWrongQuestions && wrongList.length
+    ? [
+      ...baseQuizItems,
+      ...wrongList.filter((item) => !baseKeySet.has(getMcqItemKey(item))),
+    ]
+    : baseQuizItems
 
   state.mcqQuizQuestions = quizItems
   state.mcqAnswers = Array(quizItems.length).fill('')
@@ -1751,7 +1772,7 @@ function attachExerciseEvents() {
 
     if (button?.matches('[data-mcq-start]')) {
       state.resultNotice = null
-      startMcqQuizRound(false)
+      startMcqQuizRound()
       render()
       return
     }
@@ -1764,13 +1785,16 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-mcq-retry-wrong]')) {
-      startMcqQuizRound(true)
+      startMcqQuizRound({
+        useWrongOnly: true,
+      })
       render()
       return
     }
 
     if (button?.matches('[data-mcq-retry]') || button?.matches('[data-retry-mcq]')) {
       state.resultNotice = null
+      const wrongSnapshot = [...state.mcqWrongQuestions]
 
       prepareMcqPool()
       if (!state.mcqPoolQuestions.length) {
@@ -1779,7 +1803,10 @@ function attachExerciseEvents() {
         return
       }
 
-      startMcqQuizRound(false)
+      startMcqQuizRound({
+        appendWrongQuestions: true,
+        wrongQuestions: wrongSnapshot,
+      })
       render()
       return
     }
