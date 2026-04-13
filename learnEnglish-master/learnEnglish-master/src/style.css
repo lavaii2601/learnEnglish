@@ -1170,7 +1170,7 @@ textarea:focus-visible {
     bottom: 14px;
     width: min(320px, calc(100vw - 28px));
     max-height: none;
-    overflow: hidden;
+    overflow: auto;
     z-index: 30;
     transform: translateX(0);
     opacity: 1;
@@ -1345,6 +1345,7 @@ textarea:focus-visible {
     width: calc(100vw - 20px);
     border-radius: 14px;
     padding: 12px;
+    overflow: auto;
   }
 
   .sidebar h1 {
