@@ -341,7 +341,8 @@ function buildListingSessionIndexes(totalQuestions) {
 
 function resetListingSession(totalQuestions) {
   state.listingSessionIndexes = buildListingSessionIndexes(totalQuestions)
-  state.listingCurrentIndex = state.listingSessionIndexes[0] || 0
+  // listingCurrentIndex stores the position inside listingSessionIndexes, not the question index.
+  state.listingCurrentIndex = 0
   state.listingCheckedMap = Array(totalQuestions).fill(false)
   state.listingShowAnswerMap = Array(totalQuestions).fill(false)
 }
@@ -2230,6 +2231,7 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-listing-check-current]')) {
+      if (!state.listingSessionIndexes.length) return
       const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
       state.listingCheckedMap[activeIndex] = true
       render()
@@ -2237,8 +2239,9 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-listing-show-answer]')) {
+      if (!state.listingSessionIndexes.length) return
       const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
-      state.listingShowAnswerMap[activeIndex] = true
+      state.listingShowAnswerMap[activeIndex] = !state.listingShowAnswerMap[activeIndex]
       render()
       return
     }
