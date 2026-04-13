@@ -33,7 +33,7 @@ body {
 
 #app {
   min-height: 100svh;
-  padding: 22px;
+  padding: clamp(10px, 1.8vw, 22px);
 }
 
 .landing-shell {
@@ -107,7 +107,7 @@ body {
   margin: 0 auto;
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr);
-  gap: 18px;
+  gap: clamp(10px, 1.4vw, 18px);
   transition: grid-template-columns var(--motion-mid) ease;
 }
 
@@ -115,7 +115,7 @@ body {
   background: #dbe2ea;
   border: 2px solid #a9b6c5;
   border-radius: 24px;
-  padding: 14px;
+  padding: clamp(8px, 1.2vw, 14px);
 }
 
 .shell.menu-hidden {
@@ -128,17 +128,47 @@ body {
   border-radius: 18px;
   padding: 18px;
   display: grid;
-  align-content: start;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   position: sticky;
   top: 18px;
-  height: fit-content;
+  max-height: calc(100svh - 86px);
   box-shadow: var(--shadow-soft);
-  overflow: visible;
+  overflow: hidden;
   transform: translateX(0);
   transition:
     transform var(--motion-mid) cubic-bezier(0.22, 1, 0.36, 1),
     opacity var(--motion-mid) ease;
+}
+
+.sidebar-head {
+  display: grid;
+  gap: 6px;
+}
+
+.sidebar-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar-tools {
+  border-top: 1px solid #c9d3df;
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.menu-scroll-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.menu-scroll-btn {
+  font-weight: 700;
 }
 
 .sidebar-logo {
@@ -332,7 +362,9 @@ body {
   background: var(--paper);
   border: 2px solid #9fadc0;
   border-radius: 18px;
-  padding: 22px;
+  padding: clamp(14px, 2vw, 22px);
+  max-height: calc(100svh - 86px);
+  overflow: auto;
   box-shadow: 0 10px 24px rgba(31, 41, 55, 0.12);
   transition: transform var(--motion-mid) ease;
 }
@@ -346,9 +378,13 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  z-index: 3;
   border-bottom: 1px solid #d2d9e4;
   padding-bottom: 14px;
-  margin-bottom: 18px;
+  margin-bottom: clamp(12px, 1.6vw, 18px);
 }
 
 .content-header-left {
@@ -416,7 +452,7 @@ body {
 }
 
 .page-card h2 {
-  font-size: 1.52rem;
+  font-size: clamp(1.22rem, 1.3vw + 0.8rem, 1.52rem);
   letter-spacing: 0.01em;
 }
 
@@ -467,7 +503,7 @@ p {
 }
 
 .question-text {
-  font-size: 1.03rem;
+  font-size: clamp(0.96rem, 0.35vw + 0.9rem, 1.03rem);
   line-height: 1.52;
   word-break: normal;
   overflow-wrap: break-word;
@@ -1071,6 +1107,24 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+@media (max-width: 1180px) {
+  .shell {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 14px;
+  }
+
+  .content {
+    max-height: calc(100svh - 70px);
+  }
+
+  .route-pill {
+    font-size: 0.78rem;
+  }
+}
+
 @media (max-width: 980px) {
   #app {
     padding: 14px;
@@ -1114,8 +1168,9 @@ textarea:focus-visible {
     left: 14px;
     top: 14px;
     bottom: 14px;
-    width: min(310px, calc(100vw - 28px));
-    overflow: auto;
+    width: min(320px, calc(100vw - 28px));
+    max-height: none;
+    overflow: hidden;
     z-index: 30;
     transform: translateX(0);
     opacity: 1;
@@ -1216,6 +1271,8 @@ textarea:focus-visible {
 
   .content {
     padding: 16px;
+    max-height: none;
+    overflow: visible;
   }
 
   .question-card {
@@ -1272,5 +1329,76 @@ textarea:focus-visible {
 
   .manage-card {
     flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  #app {
+    padding: 10px;
+  }
+
+  .app-shell {
+    border-radius: 14px;
+    padding: 8px;
+  }
+
+  .sidebar {
+    left: 10px;
+    top: 10px;
+    bottom: 10px;
+    width: calc(100vw - 20px);
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .sidebar h1 {
+    font-size: 0.95rem;
+  }
+
+  .sidebar-logo {
+    width: 68px;
+    height: 68px;
+  }
+
+  .menu-scroll-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .content {
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .content-header {
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+  }
+
+  .route-pill {
+    font-size: 0.74rem;
+    padding: 5px 9px;
+  }
+
+  .nav-btn,
+  .small-btn,
+  .action-btn,
+  .stack-form button {
+    min-height: 42px;
+  }
+
+  .slide-trigger {
+    padding: 10px 12px;
+  }
+
+  .question-card,
+  .stack-form,
+  .manage-card {
+    border-radius: 10px;
+    padding: 10px;
+  }
+
+  .result-dialog,
+  .edit-dialog {
+    border-radius: 12px;
   }
 }
