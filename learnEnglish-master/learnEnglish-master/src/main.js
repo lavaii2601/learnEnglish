@@ -85,6 +85,7 @@ const state = {
 let renderScheduled = false
 let exerciseEventsBound = false
 let matchingLinesRenderScheduled = false
+let lastRenderedMarkup = ''
 
 function isSourceRoute(route) {
   return route.startsWith('/source/')
@@ -2072,30 +2073,121 @@ function attachExerciseEvents() {
   app.addEventListener('submit', async (event) => {
     const form = event.target
     if (!(form instanceof HTMLFormElement)) return
-    if (!form.matches('[data-edit-dialog-form]')) return
 
-    event.preventDefault()
-    const formData = new FormData(form)
+    if (form.matches('[data-edit-dialog-form]')) {
+      event.preventDefault()
+      const formData = new FormData(form)
 
-    try {
-      const updated = await submitEditDialog(formData)
-      if (!updated) {
-        state.sourceMessage = 'Bạn cần điền đủ dữ liệu trước khi lưu.'
+      try {
+        const updated = await submitEditDialog(formData)
+        if (!updated) {
+          state.sourceMessage = 'Bạn cần điền đủ dữ liệu trước khi lưu.'
+          state.sourceMessageType = 'error'
+          render()
+          return
+        }
+
+        clearDatabaseCache()
+        await refreshDatabase({ force: true })
+        resetExerciseState()
+        state.sourceMessage = 'Đã cập nhật dữ liệu.'
+        state.sourceMessageType = 'ok'
+        render()
+      } catch (error) {
+        state.sourceMessage = error.message || 'Có lỗi khi cập nhật dữ liệu.'
+        state.sourceMessageType = 'error'
+        render()
+      }
+      return
+    }
+
+    if (form.id === 'vocab-form') {
+      event.preventDefault()
+      const formData = new FormData(form)
+
+      withRefresh(
+        async () => {
+          await createVocabulary({
+            word: String(formData.get('word') || '').trim(),
+            definition: String(formData.get('definition') || '').trim(),
+            example: String(formData.get('example') || '').trim(),
+          })
+          form.reset()
+        },
+        'Đã thêm từ vựng vào cơ sở dữ liệu SQLite.',
+      )
+      return
+    }
+
+    if (form.id === 'matching-form') {
+      event.preventDefault()
+      const formData = new FormData(form)
+
+      withRefresh(
+        async () => {
+          await createQuestion({
+            type: 'matching',
+            word: String(formData.get('word') || '').trim(),
+            meaning: String(formData.get('meaning') || '').trim(),
+          })
+          form.reset()
+        },
+        'Đã thêm từ nối vào cơ sở dữ liệu.',
+      )
+      return
+    }
+
+    if (form.id === 'question-form') {
+      event.preventDefault()
+      const formData = new FormData(form)
+      const payload = parseQuestionPayload(formData)
+
+      withRefresh(
+        async () => {
+          await createQuestion(payload)
+          form.reset()
+        },
+        'Đã lưu câu hỏi vào cơ sở dữ liệu.',
+      )
+      return
+    }
+
+    if (form.id === 'shared-list-question-form') {
+      event.preventDefault()
+      const formData = new FormData(form)
+      const targetType = String(formData.get('targetType') || 'listing').trim()
+      const prompt = String(formData.get('prompt') || '').trim()
+      const hint = String(formData.get('hint') || '').trim()
+      const answers = parseWritingSampleLines(formData.get('answersText'))
+
+      if (!answers.length) {
+        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê dùng chung.'
         state.sourceMessageType = 'error'
         render()
         return
       }
 
-      clearDatabaseCache()
-      await refreshDatabase({ force: true })
-      resetExerciseState()
-      state.sourceMessage = 'Đã cập nhật dữ liệu.'
-      state.sourceMessageType = 'ok'
-      render()
-    } catch (error) {
-      state.sourceMessage = error.message || 'Có lỗi khi cập nhật dữ liệu.'
-      state.sourceMessageType = 'error'
-      render()
+      withRefresh(
+        async () => {
+          if (targetType === 'writing') {
+            await createQuestion({
+              type: 'writing',
+              word: prompt,
+              hint,
+              keywords: answers,
+            })
+          } else {
+            await createQuestion({
+              type: 'listing',
+              prompt,
+              hint,
+              answers,
+            })
+          }
+          form.reset()
+        },
+        'Đã lưu câu hỏi liệt kê dùng chung.',
+      )
     }
   })
 
@@ -2103,20 +2195,140 @@ function attachExerciseEvents() {
     const target = event.target
 
     if (target.matches('textarea[data-writing-index]')) {
-      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
-      render()
+      const index = Number(target.dataset.writingIndex)
+      if (state.writingAnswers[index] !== target.value) {
+        state.writingAnswers[index] = target.value
+        render()
+      }
       return
     }
 
     if (target.matches('textarea[data-listing-index]')) {
-      state.listingAnswers[Number(target.dataset.listingIndex)] = target.value
-      render()
+      const index = Number(target.dataset.listingIndex)
+      if (state.listingAnswers[index] !== target.value) {
+        state.listingAnswers[index] = target.value
+        render()
+      }
     }
   })
 
-  app.addEventListener('click', (event) => {
+  app.addEventListener('click', async (event) => {
     const target = event.target
     const button = target.closest('button')
+
+    if (button?.matches('[data-route]')) {
+      const route = button.dataset.route
+      if (!route) return
+
+      state.slideBoardOpen = false
+      if (window.innerWidth <= 980 && state.sidebarOpen) {
+        state.sidebarOpen = false
+        window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
+      }
+
+      if (state.route === route) {
+        await loadDataForCurrentRoute()
+        return
+      }
+
+      setRoute(route)
+      return
+    }
+
+    if (button?.matches('[data-toggle-slide-board]')) {
+      const isMobile = window.innerWidth <= 980
+      if (isMobile && !state.slideBoardOpen) {
+        state.slideBoardOpen = true
+        state.sidebarOpen = false
+        window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
+        render()
+        return
+      }
+
+      state.slideBoardOpen = !state.slideBoardOpen
+      render()
+      return
+    }
+
+    if (button?.matches('[data-toggle-source-group]')) {
+      state.sourceGroupOpen = !state.sourceGroupOpen
+      render()
+      return
+    }
+
+    if (button?.matches('[data-toggle-menu]')) {
+      state.sidebarOpen = !state.sidebarOpen
+      window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
+      state.slideBoardOpen = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-delete-vocab]')) {
+      const id = Number(button.dataset.deleteVocab)
+      if (!id) return
+      withRefresh(
+        async () => {
+          await deleteVocabulary(id)
+        },
+        'Đã xóa từ vựng.',
+      )
+      return
+    }
+
+    if (button?.matches('[data-delete-source-matching]')) {
+      const id = Number(button.dataset.deleteSourceMatching)
+      if (!id) return
+      withRefresh(
+        async () => {
+          await deleteQuestion('matching', id)
+        },
+        'Đã xóa từ nối.',
+      )
+      return
+    }
+
+    if (button?.matches('[data-delete-question-answer]')) {
+      const id = Number(button.dataset.deleteQuestionAnswer)
+      if (!id) return
+      withRefresh(
+        async () => {
+          await deleteQuestion('mcq', id)
+        },
+        'Đã xóa câu hỏi/câu trả lời.',
+      )
+      return
+    }
+
+    if (button?.matches('[data-delete-shared-list-question]')) {
+      const token = String(button.dataset.deleteSharedListQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion(questionType === 'writing' ? 'writing' : 'listing', id)
+        },
+        'Đã xóa câu hỏi liệt kê dùng chung.',
+      )
+      return
+    }
+
+    if (button?.matches('[data-delete-question]')) {
+      const token = String(button.dataset.deleteQuestion || '')
+      const [questionType, rawId] = token.split(':')
+      const id = Number(rawId)
+      if (!questionType || !id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion(questionType, id)
+        },
+        'Đã xóa câu hỏi.',
+      )
+      return
+    }
 
     if (button?.matches('[data-mcq-prev]')) {
       if (state.mcqCurrentIndex <= 0) return
@@ -2711,22 +2923,28 @@ function attachSourceEvents() {
 }
 
 function attachEvents() {
-  attachNavEvents()
   attachExerciseEvents()
-  attachSourceEvents()
 }
 
 function render() {
   state.route = getRoute()
+  let nextMarkup = ''
+
   if (state.loading) {
-    app.innerHTML = '<main class="shell"><section class="content"><p>Đang tải dữ liệu...</p></section></main>'
+    nextMarkup = '<main class="shell"><section class="content"><p>Đang tải dữ liệu...</p></section></main>'
+  } else if (state.serverError) {
+    nextMarkup = `<main class="shell"><section class="content"><p>Không truy vấn được dữ liệu: ${escapeHtml(state.serverError)}</p></section></main>`
+  } else {
+    nextMarkup = renderCurrentPage()
+  }
+
+  if (nextMarkup === lastRenderedMarkup) {
+    scheduleMatchingLinesRender()
     return
   }
-  if (state.serverError) {
-    app.innerHTML = `<main class="shell"><section class="content"><p>Không truy vấn được dữ liệu: ${escapeHtml(state.serverError)}</p></section></main>`
-    return
-  }
-  app.innerHTML = renderCurrentPage()
+
+  app.innerHTML = nextMarkup
+  lastRenderedMarkup = nextMarkup
   attachEvents()
   scheduleMatchingLinesRender()
 }
