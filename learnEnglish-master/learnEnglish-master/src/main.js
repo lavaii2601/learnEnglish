@@ -151,14 +151,6 @@ function parseWritingSampleLines(value) {
     .filter(Boolean)
 }
 
-function tokenizeWords(value) {
-  return String(value || '')
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .map((word) => word.trim())
-    .filter(Boolean)
-}
-
 function getListingPreparedItems() {
   const list = state.database.questions.listing || []
   if (!state.listingPreparedDirty) {
@@ -171,8 +163,7 @@ function getListingPreparedItems() {
       .filter(Boolean)
       .map((line) => ({
         raw: line,
-        normalized: normalizeListLine(line),
-        words: tokenizeWords(normalizeListLine(line)),
+        normalized: normalizeText(line),
       }))
 
     return {
@@ -1587,7 +1578,6 @@ function renderListingPage() {
   const scores = scoreListing()
   const preparedItems = getListingPreparedItems()
   const sessionIndexes = state.listingSessionIndexes || []
-  const correctCount = getListingCorrectCount(scores, sessionIndexes)
   const totalCount = sessionIndexes.length
   const currentIndex = Math.max(0, Math.min(state.listingCurrentIndex, Math.max(totalCount - 1, 0)))
   const activeQuestionIndex = sessionIndexes[currentIndex] ?? 0
@@ -1598,7 +1588,6 @@ function renderListingPage() {
   const currentChecked = Boolean(state.listingCheckedMap[activeQuestionIndex])
   const currentShowAnswer = Boolean(state.listingShowAnswerMap[activeQuestionIndex])
   const checkedCount = sessionIndexes.filter((index) => state.listingCheckedMap[index]).length
-  const allChecked = totalCount > 0 && checkedCount === totalCount
   const maxSelectable = Math.min(5, Math.max(1, items.length || 1))
   const currentSelectable = Math.min(maxSelectable, Math.max(1, state.listingQuestionCount || 1))
   const totalCorrectCount = scores.reduce((sum, score) => sum + score.hitCount, 0)
@@ -1750,80 +1739,6 @@ function renderSourceVocab() {
   `
 }
 
-function renderManagedQuestions() {
-  const type = state.manageQuestionType
-  const list = state.database.questions[type]
-  if (!list.length) {
-    return '<p class="muted">Chưa có câu hỏi nào.</p>'
-  }
-
-  return list
-    .map((item) => {
-      if (type === 'mcq') {
-        const modeLabel = item.mode === 'vocabulary_definition' ? 'Từ vựng - định nghĩa' : 'Trắc nghiệm thường'
-        return `
-          <article class="manage-card">
-            <div>
-              <strong>${escapeHtml(item.question)}</strong>
-              <p class="muted">Loại: ${escapeHtml(modeLabel)}</p>
-              <p class="muted">Hệ thống tự tạo phương án nhiễu từ đáp án của câu khác.</p>
-              <p class="muted">Đáp án: ${escapeHtml(item.answer)}</p>
-            </div>
-            <div class="row-actions">
-              <button class="small-btn" data-edit-question="${type}:${item.id}">Sửa</button>
-              <button class="small-btn danger" data-delete-question="${type}:${item.id}">Xóa</button>
-            </div>
-          </article>
-        `
-      }
-
-      if (type === 'matching') {
-        return `
-          <article class="manage-card">
-            <div>
-              <strong>${escapeHtml(item.word)}</strong>
-              <p>${escapeHtml(item.meaning)}</p>
-            </div>
-            <div class="row-actions">
-              <button class="small-btn" data-edit-question="${type}:${item.id}">Sửa</button>
-              <button class="small-btn danger" data-delete-question="${type}:${item.id}">Xóa</button>
-            </div>
-          </article>
-        `
-      }
-
-      if (type === 'fillBlank') {
-        return `
-          <article class="manage-card">
-            <div>
-              <strong>${escapeHtml(item.sentence)}</strong>
-              <p class="muted">Đáp án: ${escapeHtml(item.answer)}</p>
-            </div>
-            <div class="row-actions">
-              <button class="small-btn" data-edit-question="${type}:${item.id}">Sửa</button>
-              <button class="small-btn danger" data-delete-question="${type}:${item.id}">Xóa</button>
-            </div>
-          </article>
-        `
-      }
-
-      return `
-        <article class="manage-card">
-          <div>
-            <strong>${escapeHtml(item.word)}</strong>
-            <p>${escapeHtml(item.hint)}</p>
-            <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml(item.keywords.join(' | '))}</p>
-          </div>
-          <div class="row-actions">
-            <button class="small-btn" data-edit-question="${type}:${item.id}">Sửa</button>
-            <button class="small-btn danger" data-delete-question="${type}:${item.id}">Xóa</button>
-          </div>
-        </article>
-      `
-    })
-    .join('')
-}
-
 function renderSourceQuestion() {
   const questionAnswerList = state.database.questions.mcq || []
   const writingQuestionList = (state.database.questions.writing || []).map((item) => ({
@@ -1938,61 +1853,6 @@ function renderCurrentPage() {
   if (state.route === '/source/questions') return renderLayout(renderSourceQuestion())
   if (state.route === '/source/matching') return renderLayout(renderSourceMatching())
   return renderLandingPage()
-}
-
-function attachNavEvents() {
-  document.querySelectorAll('[data-route]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      const route = button.dataset.route
-      if (!route) return
-
-      state.slideBoardOpen = false
-
-      if (window.innerWidth <= 980 && state.sidebarOpen) {
-        state.sidebarOpen = false
-        window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
-      }
-
-      if (state.route === route) {
-        await loadDataForCurrentRoute()
-        return
-      }
-
-      setRoute(route)
-    })
-  })
-
-  document.querySelectorAll('[data-toggle-slide-board]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const isMobile = window.innerWidth <= 980
-      if (isMobile && !state.slideBoardOpen) {
-        state.slideBoardOpen = true
-        state.sidebarOpen = false
-        window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
-        render()
-        return
-      }
-
-      state.slideBoardOpen = !state.slideBoardOpen
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-toggle-source-group]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.sourceGroupOpen = !state.sourceGroupOpen
-      render()
-    })
-  })
-
-  document.querySelectorAll('[data-toggle-menu]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.sidebarOpen = !state.sidebarOpen
-      window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
-      state.slideBoardOpen = false
-      render()
-    })
-  })
 }
 
 function attachExerciseEvents() {
@@ -2679,249 +2539,6 @@ function parseQuestionPayload(formData) {
   }
 }
 
-function attachSourceEvents() {
-  const vocabForm = document.querySelector('#vocab-form')
-  if (vocabForm) {
-    vocabForm.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const formData = new FormData(vocabForm)
-
-      withRefresh(
-        async () => {
-          await createVocabulary({
-            word: formData.get('word').trim(),
-            definition: formData.get('definition').trim(),
-            example: (formData.get('example') || '').trim(),
-          })
-          vocabForm.reset()
-        },
-        'Đã thêm từ vựng vào cơ sở dữ liệu SQLite.',
-      )
-    })
-  }
-
-  document.querySelectorAll('[data-delete-vocab]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.deleteVocab)
-      if (!id) return
-      withRefresh(
-        async () => {
-          await deleteVocabulary(id)
-        },
-        'Đã xóa từ vựng.',
-      )
-    })
-  })
-
-  document.querySelectorAll('[data-edit-vocab]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.editVocab)
-      const item = state.database.vocabulary.find((entry) => entry.id === id)
-      if (!item) return
-
-      openEditDialog({
-        kind: 'vocab',
-        id,
-        word: item.word,
-        definition: item.definition,
-        example: item.example || '',
-      })
-    })
-  })
-
-  const matchingForm = document.querySelector('#matching-form')
-  if (matchingForm) {
-    matchingForm.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const formData = new FormData(matchingForm)
-
-      withRefresh(
-        async () => {
-          await createQuestion({
-            type: 'matching',
-            word: String(formData.get('word') || '').trim(),
-            meaning: String(formData.get('meaning') || '').trim(),
-          })
-          matchingForm.reset()
-        },
-        'Đã thêm từ nối vào cơ sở dữ liệu.',
-      )
-    })
-  }
-
-  document.querySelectorAll('[data-delete-source-matching]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.deleteSourceMatching)
-      if (!id) return
-
-      withRefresh(
-        async () => {
-          await deleteQuestion('matching', id)
-        },
-        'Đã xóa từ nối.',
-      )
-    })
-  })
-
-  document.querySelectorAll('[data-edit-source-matching]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.editSourceMatching)
-      if (!id) return
-
-      const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
-      if (!item) return
-
-      openEditDialog({
-        kind: 'matching',
-        id,
-        word: item.word,
-        meaning: item.meaning,
-      })
-    })
-  })
-
-  const questionForm = document.querySelector('#question-form')
-  if (questionForm) {
-    questionForm.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const formData = new FormData(questionForm)
-      const payload = parseQuestionPayload(formData)
-
-      withRefresh(
-        async () => {
-          await createQuestion(payload)
-          questionForm.reset()
-        },
-        'Đã lưu câu hỏi vào cơ sở dữ liệu.',
-      )
-    })
-  }
-
-  const sharedListQuestionForm = document.querySelector('#shared-list-question-form')
-  if (sharedListQuestionForm) {
-    sharedListQuestionForm.addEventListener('submit', (event) => {
-      event.preventDefault()
-      const formData = new FormData(sharedListQuestionForm)
-      const targetType = String(formData.get('targetType') || 'listing').trim()
-      const prompt = String(formData.get('prompt') || '').trim()
-      const hint = String(formData.get('hint') || '').trim()
-      const answers = parseWritingSampleLines(formData.get('answersText'))
-
-      if (!answers.length) {
-        state.sourceMessage = 'Bạn cần nhập ít nhất 1 dòng đáp án mẫu cho câu hỏi liệt kê dùng chung.'
-        state.sourceMessageType = 'error'
-        render()
-        return
-      }
-
-      withRefresh(
-        async () => {
-          if (targetType === 'writing') {
-            await createQuestion({
-              type: 'writing',
-              word: prompt,
-              hint,
-              keywords: answers,
-            })
-          } else {
-            await createQuestion({
-              type: 'listing',
-              prompt,
-              hint,
-              answers,
-            })
-          }
-          sharedListQuestionForm.reset()
-        },
-        'Đã lưu câu hỏi liệt kê dùng chung.',
-      )
-    })
-  }
-
-  document.querySelectorAll('[data-delete-question-answer]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.deleteQuestionAnswer)
-      if (!id) return
-
-      withRefresh(
-        async () => {
-          await deleteQuestion('mcq', id)
-        },
-        'Đã xóa câu hỏi/câu trả lời.',
-      )
-    })
-  })
-
-  document.querySelectorAll('[data-edit-question-answer]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = Number(button.dataset.editQuestionAnswer)
-      if (!id) return
-
-      const item = (state.database.questions.mcq || []).find((entry) => entry.id === id)
-      if (!item) return
-
-      openEditDialog({
-        kind: 'mcq',
-        id,
-        question: item.question,
-        answer: item.answer,
-      })
-    })
-  })
-
-  document.querySelectorAll('[data-delete-shared-list-question]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const token = String(button.dataset.deleteSharedListQuestion || '')
-      const [questionType, rawId] = token.split(':')
-      const id = Number(rawId)
-      if (!id) return
-
-      withRefresh(
-        async () => {
-          await deleteQuestion(questionType === 'writing' ? 'writing' : 'listing', id)
-        },
-        'Đã xóa câu hỏi liệt kê dùng chung.',
-      )
-    })
-  })
-
-  document.querySelectorAll('[data-edit-shared-list-question]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const token = String(button.dataset.editSharedListQuestion || '')
-      const [questionType, rawId] = token.split(':')
-      const id = Number(rawId)
-      if (!id) return
-
-      const sourceList = questionType === 'writing'
-        ? (state.database.questions.writing || [])
-        : (state.database.questions.listing || [])
-      const item = sourceList.find((entry) => entry.id === id)
-      if (!item) return
-
-      if (questionType === 'writing') {
-        openEditDialog({
-          kind: 'writing',
-          questionType: 'writing',
-          id,
-          word: item.word,
-          hint: item.hint || '',
-          keywords: Array.isArray(item.keywords) ? item.keywords : [],
-        })
-        return
-      }
-
-      openEditDialog({
-        kind: 'listing',
-        questionType: 'listing',
-        id,
-        prompt: item.prompt,
-        hint: item.hint || '',
-        answers: Array.isArray(item.answers) ? item.answers : [],
-      })
-    })
-  })
-}
-
 function attachEvents() {
   attachExerciseEvents()
 }
@@ -2950,6 +2567,7 @@ function render() {
 }
 
 window.addEventListener('resize', () => {
+  if (state.route !== '/exercise/matching' || state.matchingSessionPhase !== 'playing') return
   scheduleMatchingLinesRender()
 })
 
