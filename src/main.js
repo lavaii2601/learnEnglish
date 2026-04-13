@@ -13,6 +13,14 @@ const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
 const DATABASE_CACHE_TTL_MS = 30_000
 const LISTING_MATCH_THRESHOLD = 0.7
+const ENCOURAGEMENT_IMAGES = Array.from({ length: 10 }, (_, index) => `/picture/${index + 1}.jpg`)
+const ENCOURAGEMENT_TEXTS = [
+  'Bạn làm rất tốt, tiếp tục phát huy nhé!',
+  'Tuyệt vời, mỗi lần luyện là một lần tiến bộ.',
+  'Cố lên, bạn đang đi đúng hướng rồi.',
+  'Rất ổn, giữ nhịp học đều là thắng lớn.',
+  'Bạn đang tiến bộ từng ngày, quá tuyệt!',
+]
 
 function loadSidebarOpenState() {
   const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY)
@@ -46,6 +54,9 @@ const state = {
   sidebarOpen: loadSidebarOpenState(),
   sourceGroupOpen: false,
   resultNotice: null,
+  encouragementImageUrl: '',
+  encouragementText: '',
+  lastEncouragementIndex: -1,
   serverError: '',
   loading: true,
   sourceMessage: '',
@@ -564,13 +575,13 @@ function renderMatchingLines() {
 
       const isCorrect = state.matchingChecked && Number(leftId) === Number(rightId)
       const isWrong = state.matchingChecked && Number(leftId) !== Number(rightId)
-      const strokeColor = isCorrect
-        ? '#2c9a49'
+      const stateClass = isCorrect
+        ? 'correct'
         : isWrong
-          ? '#d14646'
-          : '#3f5f7b'
+          ? 'wrong'
+          : 'normal'
 
-      return `<path d="M ${x1} ${y1} C ${x1 + controlDistance} ${y1}, ${x2 - controlDistance} ${y2}, ${x2} ${y2}" stroke="${strokeColor}" stroke-width="3" fill="none" stroke-linecap="round" />`
+      return `<path class="matching-line ${stateClass}" d="M ${x1} ${y1} C ${x1 + controlDistance} ${y1}, ${x2 - controlDistance} ${y2}, ${x2} ${y2}" />`
     })
     .filter(Boolean)
     .join('')
@@ -585,6 +596,23 @@ function scheduleMatchingLinesRender() {
     matchingLinesRenderScheduled = false
     renderMatchingLines()
   })
+}
+
+function pickEncouragement() {
+  if (!ENCOURAGEMENT_IMAGES.length) {
+    state.encouragementImageUrl = ''
+    state.encouragementText = ''
+    return
+  }
+
+  let nextIndex = Math.floor(Math.random() * ENCOURAGEMENT_IMAGES.length)
+  if (ENCOURAGEMENT_IMAGES.length > 1 && nextIndex === state.lastEncouragementIndex) {
+    nextIndex = (nextIndex + 1) % ENCOURAGEMENT_IMAGES.length
+  }
+
+  state.lastEncouragementIndex = nextIndex
+  state.encouragementImageUrl = ENCOURAGEMENT_IMAGES[nextIndex]
+  state.encouragementText = ENCOURAGEMENT_TEXTS[Math.floor(Math.random() * ENCOURAGEMENT_TEXTS.length)]
 }
 
 function scoreMcq() {
@@ -822,6 +850,7 @@ function openResultNotice(type) {
     title,
     message: `Bạn làm đúng ${correct}/${total} câu.`,
   }
+  pickEncouragement()
 
   render()
 }
@@ -964,6 +993,14 @@ function renderLayout(content) {
             <section class="result-dialog" role="dialog" aria-modal="true" aria-label="Thông báo kết quả">
               <h3>${escapeHtml(state.resultNotice.title)}</h3>
               <p>${escapeHtml(state.resultNotice.message)}</p>
+              ${state.encouragementImageUrl
+    ? `
+                  <article class="result-encouragement">
+                    <img src="${escapeHtml(state.encouragementImageUrl)}" alt="Hình động viên" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+                    <p>${escapeHtml(state.encouragementText || 'Giữ vững phong độ học tập nhé!')}</p>
+                  </article>
+                `
+    : ''}
               ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-open-mcq-review>Xem lại đúng/sai</button>' : ''}
               ${state.resultNotice.type === 'mcq' ? '<button type="button" class="small-btn" data-retry-mcq>Random bộ mới</button>' : ''}
               <button type="button" class="action-btn" data-close-result="true">Đóng</button>
@@ -1328,7 +1365,19 @@ function renderMatchingPage() {
 
           <p class="score-line">Đã nối: <strong>${Object.keys(state.matchingPairs).length}/${leftColumn.length}</strong> cặp</p>
           ${isComplete ? '<button type="button" class="action-btn" data-matching-check-result>Kiểm tra kết quả</button>' : '<p class="muted">Nối đủ tất cả cặp để hiện nút kiểm tra kết quả.</p>'}
-          ${state.matchingChecked ? `<p class="score-line">Kết quả: <strong>${score}/${leftColumn.length}</strong> cặp đúng</p>` : ''}
+          ${state.matchingChecked
+      ? `
+                <p class="score-line">Kết quả: <strong>${score}/${leftColumn.length}</strong> cặp đúng</p>
+                ${state.encouragementImageUrl
+      ? `
+                      <article class="result-encouragement inline">
+                        <img src="${escapeHtml(state.encouragementImageUrl)}" alt="Hình động viên" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+                        <p>${escapeHtml(state.encouragementText || 'Bạn làm tốt lắm!')}</p>
+                      </article>
+                    `
+      : ''}
+              `
+      : ''}
         `
       : items.length ? '<p class="muted">Chọn số lượng cặp và nhấn Bắt đầu để làm bài nối từ.</p>' : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
     </section>
@@ -1971,6 +2020,7 @@ function attachExerciseEvents() {
     if (button?.matches('[data-matching-check-result]')) {
       if (!isMatchingRoundComplete()) return
       state.matchingChecked = true
+      pickEncouragement()
       render()
       return
     }

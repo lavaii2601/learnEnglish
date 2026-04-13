@@ -729,12 +729,14 @@ textarea {
 
 .matching-board {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 18px;
 }
 
 .matching-board-wrap {
   position: relative;
+  max-width: 880px;
+  margin: 0 auto;
 }
 
 .matching-lines {
@@ -746,6 +748,22 @@ textarea {
   z-index: 1;
 }
 
+.matching-lines .matching-line {
+  fill: none;
+  stroke: #3f5f7b;
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  opacity: 0.95;
+}
+
+.matching-lines .matching-line.correct {
+  stroke: #2c9a49;
+}
+
+.matching-lines .matching-line.wrong {
+  stroke: #d14646;
+}
+
 .matching-board .matching-column {
   position: relative;
   z-index: 2;
@@ -754,10 +772,10 @@ textarea {
 .matching-column {
   border: 2px solid #c4cdda;
   border-radius: 12px;
-  padding: 10px;
+  padding: 12px;
   background: #fbfdff;
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .matching-column h3 {
@@ -771,9 +789,11 @@ textarea {
   text-align: left;
   border: 2px solid #c4cdda;
   border-radius: 10px;
-  padding: 10px;
+  padding: 9px 10px;
+  min-height: 42px;
   background: #fff;
   cursor: pointer;
+  font-weight: 600;
   transition: border-color 0.14s ease, background-color 0.14s ease;
 }
 
@@ -848,6 +868,38 @@ textarea {
   background: #fdeeee;
   border-color: #efc4c4;
   color: var(--danger);
+}
+
+.result-encouragement {
+  margin: 8px 0 2px;
+  border: 2px solid #c8d2df;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.result-encouragement img {
+  width: 74px;
+  height: 74px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 2px solid #b8c5d6;
+}
+
+.result-encouragement p {
+  margin: 0;
+  color: #2f475d;
+  font-weight: 600;
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.result-encouragement.inline {
+  margin-top: 10px;
 }
 
 .muted {
@@ -1129,6 +1181,16 @@ textarea:focus-visible {
 
   .option-row span {
     font-size: 0.98rem;
+  }
+
+  .result-encouragement {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .result-encouragement img {
+    width: 64px;
+    height: 64px;
   }
 
   .option-grid {
