@@ -72,6 +72,7 @@ const state = {
 
 let renderScheduled = false
 let exerciseEventsBound = false
+let matchingLinesRenderScheduled = false
 
 function isSourceRoute(route) {
   return route.startsWith('/source/')
@@ -526,6 +527,63 @@ function scheduleRender() {
   window.requestAnimationFrame(() => {
     renderScheduled = false
     render()
+  })
+}
+
+function renderMatchingLines() {
+  const board = app.querySelector('.matching-board')
+  const svg = app.querySelector('[data-matching-lines]')
+  if (!board || !svg || state.route !== '/exercise/matching' || state.matchingSessionPhase !== 'playing') {
+    if (svg) svg.innerHTML = ''
+    return
+  }
+
+  const boardRect = board.getBoundingClientRect()
+  if (!boardRect.width || !boardRect.height) {
+    svg.innerHTML = ''
+    return
+  }
+
+  svg.setAttribute('viewBox', `0 0 ${boardRect.width} ${boardRect.height}`)
+  svg.setAttribute('width', String(boardRect.width))
+  svg.setAttribute('height', String(boardRect.height))
+
+  const lineMarkup = Object.entries(state.matchingPairs)
+    .map(([leftId, rightId]) => {
+      const leftElement = app.querySelector(`[data-match-left="${leftId}"]`)
+      const rightElement = app.querySelector(`[data-match-right="${rightId}"]`)
+      if (!leftElement || !rightElement) return ''
+
+      const leftRect = leftElement.getBoundingClientRect()
+      const rightRect = rightElement.getBoundingClientRect()
+      const x1 = leftRect.right - boardRect.left
+      const y1 = leftRect.top + (leftRect.height / 2) - boardRect.top
+      const x2 = rightRect.left - boardRect.left
+      const y2 = rightRect.top + (rightRect.height / 2) - boardRect.top
+      const controlDistance = Math.max(40, Math.abs(x2 - x1) * 0.35)
+
+      const isCorrect = state.matchingChecked && Number(leftId) === Number(rightId)
+      const isWrong = state.matchingChecked && Number(leftId) !== Number(rightId)
+      const strokeColor = isCorrect
+        ? '#2c9a49'
+        : isWrong
+          ? '#d14646'
+          : '#3f5f7b'
+
+      return `<path d="M ${x1} ${y1} C ${x1 + controlDistance} ${y1}, ${x2 - controlDistance} ${y2}, ${x2} ${y2}" stroke="${strokeColor}" stroke-width="3" fill="none" stroke-linecap="round" />`
+    })
+    .filter(Boolean)
+    .join('')
+
+  svg.innerHTML = lineMarkup
+}
+
+function scheduleMatchingLinesRender() {
+  if (matchingLinesRenderScheduled) return
+  matchingLinesRenderScheduled = true
+  window.requestAnimationFrame(() => {
+    matchingLinesRenderScheduled = false
+    renderMatchingLines()
   })
 }
 
@@ -1216,10 +1274,12 @@ function renderMatchingPage() {
       ? `
           <article class="question-card">
             <p class="muted">Bấm 1 từ ở cột A, sau đó bấm 1 từ ở cột B để nối.</p>
-            <div class="matching-board">
-              <section class="matching-column">
-                <h3>Cột A</h3>
-                ${leftColumn
+            <div class="matching-board-wrap">
+              <svg class="matching-lines" data-matching-lines aria-hidden="true"></svg>
+              <div class="matching-board">
+                <section class="matching-column">
+                  <h3>Cột A</h3>
+                  ${leftColumn
       .map((item) => {
         const matchedRightId = Number(state.matchingPairs[item.id])
         const isSelected = selectedLeftId === Number(item.id)
@@ -1238,11 +1298,11 @@ function renderMatchingPage() {
                     `
       })
       .join('')}
-              </section>
+                </section>
 
-              <section class="matching-column">
-                <h3>Cột B</h3>
-                ${rightColumn
+                <section class="matching-column">
+                  <h3>Cột B</h3>
+                  ${rightColumn
       .map((item) => {
         const ownerLeftId = Number(rightOwnershipMap[String(item.id)] || 0)
         const isTaken = ownerLeftId > 0
@@ -1261,7 +1321,8 @@ function renderMatchingPage() {
                     `
       })
       .join('')}
-              </section>
+                </section>
+              </div>
             </div>
           </article>
 
@@ -1885,6 +1946,7 @@ function attachExerciseEvents() {
       const rightId = Number(button.dataset.matchRight)
       const selectedLeftId = Number(state.matchingSelectedLeftId)
       if (!rightId || !selectedLeftId) return
+      const hadPreviousLink = Number(state.matchingPairs[selectedLeftId]) > 0
 
       Object.entries(state.matchingPairs).forEach(([leftId, linkedRightId]) => {
         if (Number(leftId) !== selectedLeftId && Number(linkedRightId) === rightId) {
@@ -1895,10 +1957,12 @@ function attachExerciseEvents() {
       state.matchingPairs[selectedLeftId] = rightId
       state.matchingChecked = false
 
-      const nextUnmatchedLeftId = state.matchingSessionIds
-        .map((id) => Number(id))
-        .find((leftId) => !Number(state.matchingPairs[leftId]))
-      state.matchingSelectedLeftId = nextUnmatchedLeftId || selectedLeftId
+      if (!hadPreviousLink) {
+        const nextUnmatchedLeftId = state.matchingSessionIds
+          .map((id) => Number(id))
+          .find((leftId) => !Number(state.matchingPairs[leftId]))
+        state.matchingSelectedLeftId = nextUnmatchedLeftId || selectedLeftId
+      }
 
       render()
       return
@@ -2311,7 +2375,12 @@ function render() {
   }
   app.innerHTML = renderCurrentPage()
   attachEvents()
+  scheduleMatchingLinesRender()
 }
+
+window.addEventListener('resize', () => {
+  scheduleMatchingLinesRender()
+})
 
 window.addEventListener('hashchange', async () => {
   state.sourceMessage = ''

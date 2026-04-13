@@ -733,6 +733,24 @@ textarea {
   gap: 12px;
 }
 
+.matching-board-wrap {
+  position: relative;
+}
+
+.matching-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.matching-board .matching-column {
+  position: relative;
+  z-index: 2;
+}
+
 .matching-column {
   border: 2px solid #c4cdda;
   border-radius: 12px;
