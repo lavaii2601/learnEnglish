@@ -1265,10 +1265,6 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .matching-board {
-    grid-template-columns: 1fr;
-  }
-
   .content {
     padding: 16px;
     max-height: none;
