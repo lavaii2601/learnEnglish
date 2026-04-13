@@ -1365,19 +1365,6 @@ function renderMatchingPage() {
 
           <p class="score-line">Đã nối: <strong>${Object.keys(state.matchingPairs).length}/${leftColumn.length}</strong> cặp</p>
           ${isComplete ? '<button type="button" class="action-btn" data-matching-check-result>Kiểm tra kết quả</button>' : '<p class="muted">Nối đủ tất cả cặp để hiện nút kiểm tra kết quả.</p>'}
-          ${state.matchingChecked
-      ? `
-                <p class="score-line">Kết quả: <strong>${score}/${leftColumn.length}</strong> cặp đúng</p>
-                ${state.encouragementImageUrl
-      ? `
-                      <article class="result-encouragement inline">
-                        <img src="${escapeHtml(state.encouragementImageUrl)}" alt="Hình động viên" loading="lazy" decoding="async" onerror="this.style.display='none'" />
-                        <p>${escapeHtml(state.encouragementText || 'Bạn làm tốt lắm!')}</p>
-                      </article>
-                    `
-      : ''}
-              `
-      : ''}
         `
       : items.length ? '<p class="muted">Chọn số lượng cặp và nhấn Bắt đầu để làm bài nối từ.</p>' : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
     </section>
@@ -2020,8 +2007,7 @@ function attachExerciseEvents() {
     if (button?.matches('[data-matching-check-result]')) {
       if (!isMatchingRoundComplete()) return
       state.matchingChecked = true
-      pickEncouragement()
-      render()
+      openResultNotice('matching')
       return
     }
 
