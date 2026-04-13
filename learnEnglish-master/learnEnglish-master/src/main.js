@@ -12,6 +12,8 @@ import {
 const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
 const DATABASE_CACHE_TTL_MS = 30_000
+const PERSISTENT_DATABASE_CACHE_TTL_MS = 10 * 60_000
+const DATABASE_CACHE_STORAGE_KEY = 'english_lab_database_cache_v1'
 const ENCOURAGEMENT_IMAGES = Array.from({ length: 15 }, (_, index) => `/picture/${index + 1}.jpg`)
 const ENCOURAGEMENT_TEXTS = [
   'Bạn làm rất tốt, tiếp tục phát huy nhé!',
@@ -102,12 +104,55 @@ function getDatabaseCacheKey() {
   return 'default'
 }
 
+function readPersistentDatabaseCacheStore() {
+  try {
+    const raw = window.localStorage.getItem(DATABASE_CACHE_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writePersistentDatabaseCacheStore(store) {
+  try {
+    window.localStorage.setItem(DATABASE_CACHE_STORAGE_KEY, JSON.stringify(store))
+  } catch {
+    // Ignore quota and serialization failures.
+  }
+}
+
+function getPersistentDatabaseEntry(key = getDatabaseCacheKey()) {
+  const store = readPersistentDatabaseCacheStore()
+  const cached = store[key]
+  if (!cached) return null
+  if (Date.now() - cached.timestamp > PERSISTENT_DATABASE_CACHE_TTL_MS) {
+    delete store[key]
+    writePersistentDatabaseCacheStore(store)
+    return null
+  }
+  return cached
+}
+
 function getCachedDatabaseEntry() {
   const key = getDatabaseCacheKey()
   const cached = state.databaseCache[key]
-  if (!cached) return null
-  if (Date.now() - cached.timestamp > DATABASE_CACHE_TTL_MS) return null
-  return cached
+  if (cached) {
+    if (Date.now() - cached.timestamp > DATABASE_CACHE_TTL_MS) {
+      delete state.databaseCache[key]
+    } else {
+      return cached
+    }
+  }
+
+  const persistentEntry = getPersistentDatabaseEntry(key)
+  if (!persistentEntry) return null
+  state.databaseCache[key] = {
+    timestamp: Date.now(),
+    data: cloneDatabasePayload(persistentEntry.data),
+  }
+  return state.databaseCache[key]
 }
 
 function saveDatabaseCache(payload) {
@@ -116,10 +161,22 @@ function saveDatabaseCache(payload) {
     timestamp: Date.now(),
     data: cloneDatabasePayload(payload),
   }
+
+  const store = readPersistentDatabaseCacheStore()
+  store[key] = {
+    timestamp: Date.now(),
+    data: cloneDatabasePayload(payload),
+  }
+  writePersistentDatabaseCacheStore(store)
 }
 
 function clearDatabaseCache() {
   state.databaseCache = {}
+  try {
+    window.localStorage.removeItem(DATABASE_CACHE_STORAGE_KEY)
+  } catch {
+    // Ignore storage deletion failures.
+  }
 }
 
 function normalizeText(text) {
