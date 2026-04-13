@@ -34,6 +34,7 @@ const state = {
   matchingPairs: {},
   matchingSelectedLeftId: null,
   matchingChecked: false,
+  matchingSessionPhase: 'setup',
   blankAnswers: [],
   writingAnswers: [],
   listingAnswers: [],
@@ -365,6 +366,7 @@ function resetMatchingSession(totalQuestions = (state.database.questions.matchin
     state.matchingPairs = {}
     state.matchingSelectedLeftId = null
     state.matchingChecked = false
+    state.matchingSessionPhase = 'setup'
     return
   }
 
@@ -378,6 +380,24 @@ function resetMatchingSession(totalQuestions = (state.database.questions.matchin
   state.matchingPairs = {}
   state.matchingSelectedLeftId = selectedIds[0] || null
   state.matchingChecked = false
+}
+
+function clearMatchingSession() {
+  state.matchingSessionIds = []
+  state.matchingRightColumnIds = []
+  state.matchingPairs = {}
+  state.matchingSelectedLeftId = null
+  state.matchingChecked = false
+  state.matchingSessionPhase = 'setup'
+}
+
+function startMatchingSession() {
+  resetMatchingSession((state.database.questions.matching || []).length)
+  if (!state.matchingSessionIds.length) {
+    state.matchingSessionPhase = 'setup'
+    return
+  }
+  state.matchingSessionPhase = 'playing'
 }
 
 function invalidateScoreCaches() {
@@ -468,7 +488,7 @@ function resetExerciseState() {
   state.mcqReviewOpen = false
   state.mcqSessionPhase = 'setup'
   state.mcqWrongQuestions = []
-  resetMatchingSession(matching.length)
+  clearMatchingSession()
   state.blankAnswers = Array(fillBlank.length).fill('')
   state.writingAnswers = Array(writing.length).fill('')
   state.listingAnswers = Array(listing.length).fill('')
@@ -1168,6 +1188,7 @@ function renderMatchingPage() {
   const maxSelectable = Math.min(10, Math.max(1, items.length || 1))
   const selectedCount = Math.min(maxSelectable, Math.max(1, state.matchingQuestionCount || 1))
   const isComplete = isMatchingRoundComplete()
+  const inPlay = state.matchingSessionPhase === 'playing'
   const selectedLeftId = Number(state.matchingSelectedLeftId)
   const rightOwnershipMap = Object.entries(state.matchingPairs).reduce((map, [leftId, rightId]) => {
     map[String(rightId)] = Number(leftId)
@@ -1186,10 +1207,12 @@ function renderMatchingPage() {
       .join('')}
           </select>
         </label>
-        <button type="button" class="small-btn" data-matching-reset-session>Random bộ nối mới</button>
+        ${inPlay
+      ? '<button type="button" class="small-btn" data-matching-reset-session>Random bộ nối mới</button>'
+      : '<button type="button" class="action-btn" data-matching-start>Bắt đầu</button>'}
       </article>
 
-      ${leftColumn.length
+      ${inPlay && leftColumn.length
       ? `
           <article class="question-card">
             <p class="muted">Bấm 1 từ ở cột A, sau đó bấm 1 từ ở cột B để nối.</p>
@@ -1246,7 +1269,7 @@ function renderMatchingPage() {
           ${isComplete ? '<button type="button" class="action-btn" data-matching-check-result>Kiểm tra kết quả</button>' : '<p class="muted">Nối đủ tất cả cặp để hiện nút kiểm tra kết quả.</p>'}
           ${state.matchingChecked ? `<p class="score-line">Kết quả: <strong>${score}/${leftColumn.length}</strong> cặp đúng</p>` : ''}
         `
-      : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
+      : items.length ? '<p class="muted">Chọn số lượng cặp và nhấn Bắt đầu để làm bài nối từ.</p>' : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
     </section>
   `
 }
@@ -1730,7 +1753,7 @@ function attachExerciseEvents() {
     if (target.matches('[data-matching-question-count]')) {
       const nextValue = Number(target.value) || 1
       state.matchingQuestionCount = Math.min(10, Math.max(1, nextValue))
-      resetMatchingSession((state.database.questions.matching || []).length)
+      clearMatchingSession()
       render()
       return
     }
@@ -1839,7 +1862,13 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-matching-reset-session]')) {
-      resetMatchingSession((state.database.questions.matching || []).length)
+      startMatchingSession()
+      render()
+      return
+    }
+
+    if (button?.matches('[data-matching-start]')) {
+      startMatchingSession()
       render()
       return
     }
