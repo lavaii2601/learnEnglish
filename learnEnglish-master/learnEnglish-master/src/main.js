@@ -1047,49 +1047,60 @@ function renderLayout(content) {
   return `
     <main class="shell app-shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
       <aside class="sidebar">
-        <img
-          class="brand-logo sidebar-logo"
-          src="/logo.jpg"
-          alt="Logo Học tiếng Anh cùng Hồng Nga"
-          onerror="this.style.display='none'"
-        />
-        <h1>Học tiếng Anh cùng Hồng Nga</h1>
-        <p class="muted">Luyện tập và quản lý dữ liệu học tiếng Anh.</p>
+        <section class="sidebar-head">
+          <img
+            class="brand-logo sidebar-logo"
+            src="/logo.jpg"
+            alt="Logo Học tiếng Anh cùng Hồng Nga"
+            onerror="this.style.display='none'"
+          />
+          <h1>Học tiếng Anh cùng Hồng Nga</h1>
+          <p class="muted">Luyện tập và quản lý dữ liệu học tiếng Anh.</p>
+        </section>
 
-        <p class="group-title">Điều hướng</p>
-        <button class="nav-btn ${state.route === '/home' ? 'active' : ''}" data-route="/home">Trang chủ</button>
+        <section class="sidebar-scroll" data-sidebar-scroll>
+          <p class="group-title">Điều hướng</p>
+          <button class="nav-btn ${state.route === '/home' ? 'active' : ''}" data-route="/home">Trang chủ</button>
 
-        <p class="group-title">Bài tập</p>
-        <button class="nav-btn ${state.route === '/exercise/mcq' ? 'active' : ''}" data-route="/exercise/mcq">Trắc nghiệm</button>
-        <button class="nav-btn ${state.route === '/exercise/matching' ? 'active' : ''}" data-route="/exercise/matching">Nối từ</button>
-        <button class="nav-btn ${state.route === '/exercise/fill' ? 'active' : ''}" data-route="/exercise/fill">Điền chỗ trống</button>
-        <button class="nav-btn ${state.route === '/exercise/writing' ? 'active' : ''}" data-route="/exercise/writing">Viết</button>
-        <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing">Liệt kê</button>
+          <p class="group-title">Bài tập</p>
+          <button class="nav-btn ${state.route === '/exercise/mcq' ? 'active' : ''}" data-route="/exercise/mcq">Trắc nghiệm</button>
+          <button class="nav-btn ${state.route === '/exercise/matching' ? 'active' : ''}" data-route="/exercise/matching">Nối từ</button>
+          <button class="nav-btn ${state.route === '/exercise/fill' ? 'active' : ''}" data-route="/exercise/fill">Điền chỗ trống</button>
+          <button class="nav-btn ${state.route === '/exercise/writing' ? 'active' : ''}" data-route="/exercise/writing">Viết</button>
+          <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing">Liệt kê</button>
 
-        <p class="group-title">Nguồn dữ liệu</p>
-        <button
-          class="nav-btn nav-group-toggle ${sourceGroupOpen ? 'active' : ''}"
-          type="button"
-          data-toggle-source-group="true"
-          aria-expanded="${sourceGroupOpen ? 'true' : 'false'}"
-        >
-          <span>Thêm nguồn</span>
-          <span class="nav-caret">${sourceGroupOpen ? '▾' : '▸'}</span>
-        </button>
-        <div class="nav-subgroup ${sourceGroupOpen ? 'open' : ''}">
-          <button class="nav-btn nav-sub-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
-          <button class="nav-btn nav-sub-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
-          <button class="nav-btn nav-sub-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching">Nhiệm vụ: Thêm từ nối</button>
-        </div>
+          <p class="group-title">Nguồn dữ liệu</p>
+          <button
+            class="nav-btn nav-group-toggle ${sourceGroupOpen ? 'active' : ''}"
+            type="button"
+            data-toggle-source-group="true"
+            aria-expanded="${sourceGroupOpen ? 'true' : 'false'}"
+          >
+            <span>Thêm nguồn</span>
+            <span class="nav-caret">${sourceGroupOpen ? '▾' : '▸'}</span>
+          </button>
+          <div class="nav-subgroup ${sourceGroupOpen ? 'open' : ''}">
+            <button class="nav-btn nav-sub-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
+            <button class="nav-btn nav-sub-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
+            <button class="nav-btn nav-sub-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching">Nhiệm vụ: Thêm từ nối</button>
+          </div>
+        </section>
 
-        <button
-          class="slide-trigger ${state.slideBoardOpen ? 'active' : ''}"
-          data-toggle-slide-board="true"
-          type="button"
-          aria-expanded="${state.slideBoardOpen ? 'true' : 'false'}"
-        >
-          ${state.slideBoardOpen ? 'Thu gọn bảng nhanh' : 'Mở bảng nhanh'}
-        </button>
+        <section class="sidebar-tools">
+          <div class="menu-scroll-controls">
+            <button type="button" class="small-btn menu-scroll-btn" data-menu-scroll="up">Lên</button>
+            <button type="button" class="small-btn menu-scroll-btn" data-menu-scroll="down">Xuống</button>
+          </div>
+
+          <button
+            class="slide-trigger ${state.slideBoardOpen ? 'active' : ''}"
+            data-toggle-slide-board="true"
+            type="button"
+            aria-expanded="${state.slideBoardOpen ? 'true' : 'false'}"
+          >
+            ${state.slideBoardOpen ? 'Thu gọn bảng nhanh' : 'Mở bảng nhanh'}
+          </button>
+        </section>
 
         <section class="slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
           ${quickBoardMarkup}
@@ -1653,8 +1664,9 @@ function renderListingPage() {
       : ''}
             </article>
             <div class="mcq-complete-actions">
-              ${currentChecked ? (!sessionComplete ? '<button type="button" class="action-btn" data-listing-next-question>Qua câu ngẫu nhiên tiếp theo</button>' : '') : '<button type="button" class="action-btn" data-listing-check-current>Kiểm tra câu hiện tại</button>'}
-              <button type="button" class="small-btn" data-listing-show-answer>Xem kết quả</button>
+              <button type="button" class="action-btn" ${currentChecked ? 'data-listing-next-question' : 'data-listing-check-current'}>${currentChecked ? (!sessionComplete ? 'Qua câu tiếp theo' : 'Hoàn tất') : 'Kiểm tra câu hiện tại'}</button>
+              ${!sessionComplete ? '<button type="button" class="small-btn" data-listing-skip-question>Câu mới</button>' : ''}
+              <button type="button" class="small-btn" data-listing-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem kết quả'}</button>
             </div>
           `
       : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
@@ -2095,6 +2107,17 @@ function attachExerciseEvents() {
       return
     }
 
+    if (button?.matches('[data-menu-scroll]')) {
+      const direction = button.dataset.menuScroll === 'up' ? -1 : 1
+      const menuScrollBox = app.querySelector('[data-sidebar-scroll]')
+      if (!menuScrollBox) return
+      menuScrollBox.scrollBy({
+        top: direction * 220,
+        behavior: 'smooth',
+      })
+      return
+    }
+
     if (button?.matches('[data-toggle-slide-board]')) {
       const isMobile = window.innerWidth <= 980
       if (isMobile && !state.slideBoardOpen) {
@@ -2220,6 +2243,22 @@ function attachExerciseEvents() {
       return
     }
 
+    if (button?.matches('[data-listing-skip-question]')) {
+      const uncheckedIndexes = state.listingSessionIndexes
+        .filter((index) => !state.listingCheckedMap[index])
+        .filter((index) => index !== state.listingSessionIndexes[state.listingCurrentIndex])
+
+      if (!uncheckedIndexes.length) return
+
+      const prevIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
+      const randomIndex = Math.floor(Math.random() * uncheckedIndexes.length)
+      const nextQuestionIndex = uncheckedIndexes[randomIndex]
+      state.listingCurrentIndex = state.listingSessionIndexes.findIndex((index) => index === nextQuestionIndex)
+      state.listingShowAnswerMap[prevIndex] = false
+      render()
+      return
+    }
+
     if (button?.matches('[data-listing-next-question]')) {
       const uncheckedIndexes = state.listingSessionIndexes
         .filter((index) => !state.listingCheckedMap[index])
@@ -2228,7 +2267,9 @@ function attachExerciseEvents() {
 
       const randomIndex = Math.floor(Math.random() * uncheckedIndexes.length)
       const nextQuestionIndex = uncheckedIndexes[randomIndex]
+      const prevIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
       state.listingCurrentIndex = state.listingSessionIndexes.findIndex((index) => index === nextQuestionIndex)
+      state.listingShowAnswerMap[prevIndex] = false
       render()
       return
     }
