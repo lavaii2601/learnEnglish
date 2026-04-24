@@ -34,7 +34,7 @@ const state = {
   route: getRoute(),
   database: {
     vocabulary: [],
-    questions: { mcq: [], matching: [], fillBlank: [], writing: [], listing: [] },
+    questions: { mcq: [], matching: [], fillBlank: [], writing: [], listing: [], arrange: [] },
   },
   mcqAnswers: [],
   matchingQuestionCount: 5,
@@ -82,6 +82,13 @@ const state = {
   writingScoreCache: [],
   listingScoreDirty: true,
   listingScoreCache: [],
+  arrangeQuestionCount: 5,
+  arrangeSessionIndexes: [],
+  arrangeCurrentIndex: 0,
+  arrangeCheckedMap: [],
+  arrangeShowAnswerMap: [],
+  arrangeTypedAnswers: [],
+  arrangeFeedbackMap: [],
 }
 
 let renderScheduled = false
@@ -206,6 +213,36 @@ function parseWritingSampleLines(value) {
     .split(/\r?\n/)
     .map((line) => cleanListLine(line))
     .filter(Boolean)
+}
+
+function normalizeArrangeSentence(text) {
+  return String(text || '').trim().replace(/\s+/g, ' ')
+}
+
+function buildArrangeSessionIndexes(totalQuestions) {
+  const cappedTotal = Math.max(0, Number(totalQuestions) || 0)
+  if (!cappedTotal) return []
+
+  const maxAllowed = Math.min(5, cappedTotal)
+  const selectedCount = Math.min(maxAllowed, Math.max(1, state.arrangeQuestionCount || 1))
+  const allIndexes = Array.from({ length: cappedTotal }, (_, index) => index)
+  return getShuffledItems(allIndexes).slice(0, selectedCount)
+}
+
+function resetArrangeSession(totalQuestions) {
+  const total = Math.max(0, Number(totalQuestions) || 0)
+  state.arrangeSessionIndexes = buildArrangeSessionIndexes(total)
+  state.arrangeCurrentIndex = 0
+  state.arrangeCheckedMap = Array(total).fill(false)
+  state.arrangeShowAnswerMap = Array(total).fill(false)
+  state.arrangeFeedbackMap = Array(total).fill('')
+  state.arrangeTypedAnswers = Array(total).fill('')
+}
+
+function scoreArrange() {
+  return state.arrangeSessionIndexes
+    .filter((index) => state.arrangeCheckedMap[index])
+    .length
 }
 
 function getListingPreparedItems() {
@@ -525,6 +562,7 @@ function resetExerciseState() {
     fillBlank,
     writing,
     listing = [],
+    arrange = [],
   } = state.database.questions
   prepareMcqPool()
   state.mcqQuizQuestions = []
@@ -540,6 +578,7 @@ function resetExerciseState() {
   state.listingAnswers = Array(listing.length).fill('')
   resetListingSession(listing.length)
   state.listingPreparedDirty = true
+  resetArrangeSession(arrange.length)
   invalidateScoreCaches()
 }
 
@@ -673,6 +712,8 @@ function getEditDialogTitle(dialog) {
       return 'Sửa đề viết định nghĩa'
     case 'listing':
       return 'Sửa câu hỏi liệt kê'
+    case 'arrange':
+      return 'Sửa câu hỏi sắp xếp'
     default:
       return 'Sửa dữ liệu'
   }
@@ -692,6 +733,8 @@ function getEditDialogActionLabel(dialog) {
       return 'Lưu đề viết'
     case 'listing':
       return 'Lưu câu liệt kê'
+    case 'arrange':
+      return 'Lưu câu sắp xếp'
     default:
       return 'Lưu thay đổi'
   }
@@ -747,6 +790,14 @@ function renderEditDialog() {
       <label>Nội dung câu hỏi<textarea name="prompt" required rows="4">${escapeHtml(dialog.prompt || '')}</textarea></label>
       <label>Gợi ý<textarea name="hint" rows="3">${escapeHtml(dialog.hint || '')}</textarea></label>
       <label>Đáp án mẫu theo dòng<textarea name="answersText" required rows="5">${escapeHtml((dialog.answers || []).join('\n'))}</textarea></label>
+    `
+  }
+
+  if (dialog.kind === 'arrange') {
+    bodyMarkup = `
+      <label>Nội dung câu hỏi<textarea name="prompt" required rows="4">${escapeHtml(dialog.prompt || '')}</textarea></label>
+      <label>Gợi ý<textarea name="hint" rows="3">${escapeHtml(dialog.hint || '')}</textarea></label>
+      <label>Câu đúng cần sắp xếp<textarea name="answer" required rows="3">${escapeHtml(dialog.answer || '')}</textarea></label>
     `
   }
 
@@ -843,6 +894,21 @@ async function submitEditDialog(formData) {
         answers,
       })
     }
+    state.editDialog = null
+    return true
+  }
+
+  if (kind === 'arrange') {
+    const prompt = String(formData.get('prompt') || '').trim()
+    const hint = String(formData.get('hint') || '').trim()
+    const answer = normalizeArrangeSentence(formData.get('answer'))
+    if (!prompt || !answer) return false
+
+    await updateQuestion('arrange', id, {
+      prompt,
+      hint,
+      answer,
+    })
     state.editDialog = null
     return true
   }
@@ -1049,6 +1115,12 @@ function openResultNotice(type) {
     title = 'Kết quả bài liệt kê'
   }
 
+  if (type === 'arrange') {
+    correct = scoreArrange()
+    total = state.arrangeSessionIndexes.length
+    title = 'Kết quả sắp xếp câu'
+  }
+
   state.resultNotice = {
     type,
     title,
@@ -1069,6 +1141,7 @@ function renderLayout(content) {
     '/exercise/fill': 'Điền chỗ trống',
     '/exercise/writing': 'Viết định nghĩa',
     '/exercise/listing': 'Liệt kê ý',
+    '/exercise/arrange': 'Sắp xếp câu',
     '/source/vocab': 'Thêm từ vựng',
     '/source/questions': 'Thêm câu hỏi',
     '/source/matching': 'Thêm từ nối',
@@ -1084,8 +1157,10 @@ function renderLayout(content) {
     state.database.questions.matching.length +
     state.database.questions.fillBlank.length +
     state.database.questions.writing.length +
-    (state.database.questions.listing || []).length
+    (state.database.questions.listing || []).length +
+    (state.database.questions.arrange || []).length
   const listingCount = (state.database.questions.listing || []).length
+  const arrangeCount = (state.database.questions.arrange || []).length
 
   const quickBoardMarkup = `
     <header class="slide-board-head">
@@ -1099,6 +1174,7 @@ function renderLayout(content) {
       <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
       <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
       <article><span>Câu hỏi liệt kê</span><strong>${listingCount}</strong></article>
+      <article><span>Câu hỏi sắp xếp</span><strong>${arrangeCount}</strong></article>
     </div>
   `
 
@@ -1126,6 +1202,7 @@ function renderLayout(content) {
           <button class="nav-btn ${state.route === '/exercise/fill' ? 'active' : ''}" data-route="/exercise/fill">Điền chỗ trống</button>
           <button class="nav-btn ${state.route === '/exercise/writing' ? 'active' : ''}" data-route="/exercise/writing">Viết</button>
           <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing">Liệt kê</button>
+          <button class="nav-btn ${state.route === '/exercise/arrange' ? 'active' : ''}" data-route="/exercise/arrange">Sắp xếp câu</button>
 
           <p class="group-title">Nguồn dữ liệu</p>
           <button
@@ -1323,6 +1400,7 @@ function renderHome() {
   const blankCount = state.database.questions.fillBlank.length
   const writingCount = state.database.questions.writing.length
   const listingCount = (state.database.questions.listing || []).length
+  const arrangeCount = (state.database.questions.arrange || []).length
 
   return `
     <section class="page-card">
@@ -1335,7 +1413,87 @@ function renderHome() {
         <article><strong>${blankCount}</strong><span>Câu điền trống</span></article>
         <article><strong>${writingCount}</strong><span>Đề viết</span></article>
         <article><strong>${listingCount}</strong><span>Câu hỏi liệt kê</span></article>
+        <article><strong>${arrangeCount}</strong><span>Câu hỏi sắp xếp</span></article>
       </div>
+    </section>
+  `
+}
+
+function renderArrangePage() {
+  const items = state.database.questions.arrange || []
+  const sessionIndexes = state.arrangeSessionIndexes || []
+  const totalCount = sessionIndexes.length
+  const currentIndex = Math.max(0, Math.min(state.arrangeCurrentIndex, Math.max(totalCount - 1, 0)))
+  const activeQuestionIndex = sessionIndexes[currentIndex] ?? 0
+  const currentItem = items[activeQuestionIndex]
+  const typedAnswer = state.arrangeTypedAnswers[activeQuestionIndex] || ''
+  const builtSentence = normalizeArrangeSentence(typedAnswer)
+  const expectedSentence = normalizeArrangeSentence(currentItem?.answer)
+  const isExactMatch = builtSentence === expectedSentence
+  const currentChecked = Boolean(state.arrangeCheckedMap[activeQuestionIndex])
+  const currentShowAnswer = Boolean(state.arrangeShowAnswerMap[activeQuestionIndex])
+  const feedbackText = String(state.arrangeFeedbackMap[activeQuestionIndex] || '').trim()
+  const checkedCount = sessionIndexes.filter((index) => state.arrangeCheckedMap[index]).length
+  const maxSelectable = Math.min(5, Math.max(1, items.length || 1))
+  const currentSelectable = Math.min(maxSelectable, Math.max(1, state.arrangeQuestionCount || 1))
+  const sessionComplete = totalCount > 0 && checkedCount === totalCount
+
+  return `
+    <section class="page-card">
+      <h2>Sắp xếp câu</h2>
+      <article class="question-card compact">
+        <label>
+          Số lượng câu sắp xếp (1-5)
+          <select data-arrange-question-count>
+            ${Array.from({ length: maxSelectable }, (_, index) => index + 1)
+      .map((value) => `<option value="${value}" ${currentSelectable === value ? 'selected' : ''}>${value} câu</option>`)
+      .join('')}
+          </select>
+        </label>
+        <button type="button" class="small-btn" data-arrange-reset-session>Random bộ câu mới</button>
+      </article>
+      ${currentItem
+      ? `
+            <article class="question-card">
+              <h3 class="question-title">
+                <span class="question-order">Câu ngẫu nhiên (${checkedCount}/${totalCount} đã đúng)</span>
+                <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
+              </h3>
+              <p class="question-hint">${escapeHtml(currentItem.hint || 'Nhập lại câu đúng vào ô bên dưới.')}</p>
+              <p class="muted">Hệ thống sẽ chuẩn hóa khoảng trắng và kiểm tra chính xác theo từng ký tự của câu bạn nhập.</p>
+              <textarea data-arrange-index="${activeQuestionIndex}" rows="4" placeholder="Nhập câu đúng tại đây">${escapeHtml(typedAnswer)}</textarea>
+              <p class="muted">Bạn đã nhập: <strong>${escapeHtml(builtSentence || '(trống)')}</strong></p>
+              ${feedbackText ? `<p class="notice ${currentChecked ? 'ok' : 'error'}">${escapeHtml(feedbackText)}</p>` : ''}
+              ${currentChecked
+          ? `
+                    <div class="listing-review-block">
+                      <article class="listing-review-item ok">
+                        <p><strong>Kết quả:</strong> Đúng hoàn toàn theo ký tự.</p>
+                      </article>
+                    </div>
+                  `
+          : ''}
+              ${currentShowAnswer
+          ? `
+                    <div class="listing-review-block">
+                      <article class="listing-review-item ok">
+                        <p><strong>Đáp án đúng:</strong> ${escapeHtml(expectedSentence || '(trống)')}</p>
+                      </article>
+                    </div>
+                  `
+          : ''}
+            </article>
+            <div class="mcq-complete-actions">
+              <button type="button" class="action-btn" ${currentChecked ? 'data-arrange-next-question' : 'data-arrange-check-current'}>${currentChecked ? (!sessionComplete ? 'Qua câu tiếp theo' : 'Hoàn tất') : 'Kiểm tra câu hiện tại'}</button>
+              ${!sessionComplete ? '<button type="button" class="small-btn" data-arrange-skip-question>Câu mới</button>' : ''}
+              <button type="button" class="small-btn" data-arrange-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án'}</button>
+              <button type="button" class="small-btn" data-arrange-clear-current ${typedAnswer.trim() ? '' : 'disabled'}>Xóa câu đã nhập</button>
+            </div>
+          `
+      : '<p class="muted">Chưa có câu hỏi sắp xếp nào.</p>'}
+      <p class="score-line">Đúng hoàn toàn: <strong>${scoreArrange()}/${totalCount}</strong> câu</p>
+      ${sessionComplete ? '<button type="button" class="action-btn" data-check-result="arrange">Kiểm tra kết quả</button>' : ''}
+      ${!currentChecked && builtSentence && !isExactMatch ? '<p class="muted">Cần sắp xếp lại và nhập đúng hoàn toàn trước khi qua câu tiếp theo.</p>' : ''}
     </section>
   `
 }
@@ -1825,6 +1983,13 @@ function renderSourceQuestion() {
     hint: item.hint,
     answers: item.answers || [],
   }))
+  const arrangeQuestionList = (state.database.questions.arrange || []).map((item) => ({
+    id: item.id,
+    questionType: 'arrange',
+    prompt: item.prompt,
+    hint: item.hint,
+    answer: item.answer || '',
+  }))
   const sharedListQuestions = [...writingQuestionList, ...listingQuestionList]
     .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))
 
@@ -1854,6 +2019,14 @@ function renderSourceQuestion() {
           <textarea name="answersText" rows="5" required placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3"></textarea>
         </label>
         <button type="submit">Lưu câu hỏi liệt kê</button>
+      </form>
+
+      <h3>Thêm câu hỏi sắp xếp câu</h3>
+      <form id="arrange-question-form" class="stack-form">
+        <label>Nội dung câu hỏi<input name="prompt" required placeholder="Sắp xếp thành câu đúng: I / like / apples" /></label>
+        <label>Gợi ý<input name="hint" placeholder="Bắt đầu bằng chữ I" /></label>
+        <label>Câu đúng<input name="answer" required placeholder="I like apples." /></label>
+        <button type="submit">Lưu câu hỏi sắp xếp</button>
       </form>
 
       <h3>Quản lý câu hỏi/câu trả lời (sửa/xóa)</h3>
@@ -1902,6 +2075,29 @@ function renderSourceQuestion() {
           : '<p class="muted">Chưa có câu hỏi liệt kê dùng chung nào.</p>'}
       </div>
 
+      <h3>Quản lý câu hỏi sắp xếp (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${arrangeQuestionList.length
+          ? arrangeQuestionList
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <strong>${escapeHtml(item.prompt)}</strong>
+                    <p>${escapeHtml(item.hint)}</p>
+                    <p class="muted">Đáp án đúng: ${escapeHtml(item.answer)}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button class="small-btn" data-edit-arrange-question="${item.id}">Sửa</button>
+                    <button class="small-btn danger" data-delete-arrange-question="${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có câu hỏi sắp xếp nào.</p>'}
+      </div>
+
       ${renderSourceMessage()}
     </section>
   `
@@ -1919,6 +2115,7 @@ function renderCurrentPage() {
   if (state.route === '/exercise/fill') return renderLayout(renderFillPage())
   if (state.route === '/exercise/writing') return renderLayout(renderWritingPage())
   if (state.route === '/exercise/listing') return renderLayout(renderListingPage())
+  if (state.route === '/exercise/arrange') return renderLayout(renderArrangePage())
   if (state.route === '/source/vocab') return renderLayout(renderSourceVocab())
   if (state.route === '/source/questions') return renderLayout(renderSourceQuestion())
   if (state.route === '/source/matching') return renderLayout(renderSourceMatching())
@@ -1945,6 +2142,14 @@ function attachExerciseEvents() {
       const nextValue = Number(target.value) || 1
       state.listingQuestionCount = Math.min(5, Math.max(1, nextValue))
       resetListingSession((state.database.questions.listing || []).length)
+      render()
+      return
+    }
+
+    if (target.matches('[data-arrange-question-count]')) {
+      const nextValue = Number(target.value) || 1
+      state.arrangeQuestionCount = Math.min(5, Math.max(1, nextValue))
+      resetArrangeSession((state.database.questions.arrange || []).length)
       render()
       return
     }
@@ -1997,6 +2202,16 @@ function attachExerciseEvents() {
       state.listingCheckedMap[index] = false
       state.listingShowAnswerMap[index] = false
       state.listingScoreDirty = true
+      return
+    }
+
+    if (target.matches('textarea[data-arrange-index]')) {
+      const index = Number(target.dataset.arrangeIndex)
+      state.arrangeTypedAnswers[index] = target.value
+      state.arrangeCheckedMap[index] = false
+      state.arrangeShowAnswerMap[index] = false
+      state.arrangeFeedbackMap[index] = ''
+      scheduleRender()
     }
   })
 
@@ -2117,6 +2332,35 @@ function attachExerciseEvents() {
           form.reset()
         },
         'Đã lưu câu hỏi liệt kê dùng chung.',
+      )
+      return
+    }
+
+    if (form.id === 'arrange-question-form') {
+      event.preventDefault()
+      const formData = new FormData(form)
+      const prompt = String(formData.get('prompt') || '').trim()
+      const hint = String(formData.get('hint') || '').trim()
+      const answer = normalizeArrangeSentence(formData.get('answer'))
+
+      if (!prompt || !answer) {
+        state.sourceMessage = 'Bạn cần nhập đầy đủ câu hỏi và câu đúng cho bài sắp xếp.'
+        state.sourceMessageType = 'error'
+        render()
+        return
+      }
+
+      withRefresh(
+        async () => {
+          await createQuestion({
+            type: 'arrange',
+            prompt,
+            hint,
+            answer,
+          })
+          form.reset()
+        },
+        'Đã lưu câu hỏi sắp xếp.',
       )
     }
   })
@@ -2256,6 +2500,19 @@ function attachExerciseEvents() {
       return
     }
 
+    if (button?.matches('[data-delete-arrange-question]')) {
+      const id = Number(button.dataset.deleteArrangeQuestion)
+      if (!id) return
+
+      withRefresh(
+        async () => {
+          await deleteQuestion('arrange', id)
+        },
+        'Đã xóa câu hỏi sắp xếp.',
+      )
+      return
+    }
+
     if (button?.matches('[data-delete-question]')) {
       const token = String(button.dataset.deleteQuestion || '')
       const [questionType, rawId] = token.split(':')
@@ -2336,6 +2593,90 @@ function attachExerciseEvents() {
 
     if (button?.matches('[data-listing-reset-session]')) {
       resetListingSession((state.database.questions.listing || []).length)
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-clear-current]')) {
+      if (!state.arrangeSessionIndexes.length) return
+      const activeIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
+      state.arrangeTypedAnswers[activeIndex] = ''
+      state.arrangeCheckedMap[activeIndex] = false
+      state.arrangeShowAnswerMap[activeIndex] = false
+      state.arrangeFeedbackMap[activeIndex] = ''
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-check-current]')) {
+      if (!state.arrangeSessionIndexes.length) return
+      const activeIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
+      const currentItem = (state.database.questions.arrange || [])[activeIndex]
+      if (!currentItem) return
+
+      const userSentence = normalizeArrangeSentence(state.arrangeTypedAnswers[activeIndex])
+      const expectedSentence = normalizeArrangeSentence(currentItem.answer)
+
+      if (!userSentence) {
+        state.arrangeFeedbackMap[activeIndex] = 'Bạn chưa nhập câu. Hãy nhập câu đúng rồi kiểm tra lại.'
+        state.arrangeCheckedMap[activeIndex] = false
+        render()
+        return
+      }
+
+      if (userSentence === expectedSentence) {
+        state.arrangeCheckedMap[activeIndex] = true
+        state.arrangeFeedbackMap[activeIndex] = 'Chính xác! Bạn đã nhập đúng hoàn toàn theo ký tự.'
+      } else {
+        state.arrangeCheckedMap[activeIndex] = false
+        state.arrangeFeedbackMap[activeIndex] = 'Chưa đúng. Hãy sắp xếp lại và nhập đúng hoàn toàn theo ký tự.'
+      }
+
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-show-answer]')) {
+      if (!state.arrangeSessionIndexes.length) return
+      const activeIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
+      state.arrangeShowAnswerMap[activeIndex] = !state.arrangeShowAnswerMap[activeIndex]
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-skip-question]')) {
+      const uncheckedIndexes = state.arrangeSessionIndexes
+        .filter((index) => !state.arrangeCheckedMap[index])
+        .filter((index) => index !== state.arrangeSessionIndexes[state.arrangeCurrentIndex])
+
+      if (!uncheckedIndexes.length) return
+
+      const prevIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
+      const randomIndex = Math.floor(Math.random() * uncheckedIndexes.length)
+      const nextQuestionIndex = uncheckedIndexes[randomIndex]
+      state.arrangeCurrentIndex = state.arrangeSessionIndexes.findIndex((index) => index === nextQuestionIndex)
+      state.arrangeShowAnswerMap[prevIndex] = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-next-question]')) {
+      const uncheckedIndexes = state.arrangeSessionIndexes
+        .filter((index) => !state.arrangeCheckedMap[index])
+
+      if (!uncheckedIndexes.length) return
+
+      const randomIndex = Math.floor(Math.random() * uncheckedIndexes.length)
+      const nextQuestionIndex = uncheckedIndexes[randomIndex]
+      const prevIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
+      state.arrangeCurrentIndex = state.arrangeSessionIndexes.findIndex((index) => index === nextQuestionIndex)
+      state.arrangeShowAnswerMap[prevIndex] = false
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-reset-session]')) {
+      resetArrangeSession((state.database.questions.arrange || []).length)
       render()
       return
     }
@@ -2425,10 +2766,12 @@ function attachExerciseEvents() {
         return
       }
 
-      if (questionType === 'writing' || questionType === 'listing') {
+      if (questionType === 'writing' || questionType === 'listing' || questionType === 'arrange') {
         const sourceList = questionType === 'writing'
           ? (state.database.questions.writing || [])
-          : (state.database.questions.listing || [])
+          : questionType === 'listing'
+            ? (state.database.questions.listing || [])
+            : (state.database.questions.arrange || [])
         const item = sourceList.find((entry) => entry.id === id)
         if (!item) return
 
@@ -2447,6 +2790,13 @@ function attachExerciseEvents() {
               hint: item.hint || '',
               answers: item.answers || [],
             }),
+          ...(questionType === 'arrange'
+            ? {
+              prompt: item.prompt,
+              hint: item.hint || '',
+              answer: item.answer || '',
+            }
+            : {}),
         })
       }
       return
@@ -2479,6 +2829,21 @@ function attachExerciseEvents() {
             hint: item.hint || '',
             answers: item.answers || [],
           }),
+      })
+      return
+    }
+
+    if (button?.matches('[data-edit-arrange-question]')) {
+      const id = Number(button.dataset.editArrangeQuestion)
+      const item = (state.database.questions.arrange || []).find((entry) => entry.id === id)
+      if (!item) return
+
+      openEditDialog({
+        kind: 'arrange',
+        id,
+        prompt: item.prompt,
+        hint: item.hint || '',
+        answer: item.answer || '',
       })
       return
     }

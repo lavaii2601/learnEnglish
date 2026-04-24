@@ -81,10 +81,12 @@ function toQuestionType(type) {
   if (type === 'fillBlank') return 'fillBlank'
   if (type === 'writing') return 'writing'
   if (type === 'listing') return 'listing'
+  if (type === 'arrange') return 'arrange'
   return null
 }
 
 function toWritingKind(value) {
+  if (value === 'arrange') return 'arrange'
   if (value === 'listing') return 'listing'
   return 'writing'
 }
@@ -411,6 +413,12 @@ async function seedIfEmpty() {
         keywords: ['improves vocabulary', 'reduces stress', 'expands knowledge'],
         kind: 'listing',
       },
+      {
+        word: 'Sắp xếp thành câu hoàn chỉnh.',
+        hint: 'Bắt đầu bằng chủ ngữ "She".',
+        keywords: ['She goes to school every day.'],
+        kind: 'arrange',
+      },
     ]))
     assertNoSupabaseError(error, 'Không thể seed câu hỏi liệt kê')
   }
@@ -457,6 +465,8 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
 
   const writingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) !== 'listing')
   const listingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'listing')
+  const arrangeRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'arrange')
+  const definitionRows = writingRows.filter((row) => toWritingKind(row.kind) === 'writing')
 
   const vocabularyAnswerRows = vocabularyRows
     .map((row) => ({
@@ -525,7 +535,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
       })),
       matching: matchingRows,
       fillBlank: fillRows,
-      writing: writingRows.map((row) => ({
+      writing: definitionRows.map((row) => ({
         id: row.id,
         word: row.word,
         hint: row.hint,
@@ -536,6 +546,12 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         prompt: row.word,
         hint: row.hint,
         answers: Array.isArray(row.keywords) ? row.keywords : [],
+      })),
+      arrange: arrangeRows.map((row) => ({
+        id: row.id,
+        prompt: row.word,
+        hint: row.hint,
+        answer: Array.isArray(row.keywords) ? String(row.keywords[0] || '').trim() : '',
       })),
     },
   }
@@ -738,6 +754,26 @@ app.post('/api/questions', async (req, res, next) => {
       assertNoSupabaseError(error, 'Không thể thêm câu hỏi liệt kê')
     }
 
+    if (type === 'arrange') {
+      const prompt = String(req.body.prompt || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answer = String(req.body.answer || '').trim()
+
+      if (!prompt || !answer) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi sắp xếp không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('writing_questions').insert([
+        {
+          word: prompt,
+          hint,
+          keywords: [answer],
+          kind: 'arrange',
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi sắp xếp')
+    }
+
     if (!type) {
       return res.status(400).json({ message: 'Loại câu hỏi không hợp lệ' })
     }
@@ -854,6 +890,23 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
       clearDatabaseResponseCache()
     }
 
+    if (type === 'arrange') {
+      const prompt = String(req.body.prompt || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answer = String(req.body.answer || '').trim()
+
+      if (!prompt || !answer) {
+        return res.status(400).json({ message: 'Dữ liệu câu hỏi sắp xếp không hợp lệ' })
+      }
+
+      const { error } = await supabase
+        .from('writing_questions')
+        .update({ word: prompt, hint, keywords: [answer], kind: 'arrange' })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi sắp xếp')
+      clearDatabaseResponseCache()
+    }
+
     return res.json({ ok: true })
   } catch (error) {
     next(error)
@@ -897,6 +950,12 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
       clearDatabaseResponseCache()
     }
 
+    if (type === 'arrange') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi sắp xếp')
+      clearDatabaseResponseCache()
+    }
+
     return res.json({ ok: true })
   } catch (error) {
     next(error)
@@ -937,6 +996,12 @@ app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
     if (type === 'listing') {
       const { error } = await supabase.from('writing_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
+      clearDatabaseResponseCache()
+    }
+
+    if (type === 'arrange') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi sắp xếp')
       clearDatabaseResponseCache()
     }
 

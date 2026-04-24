@@ -1399,3 +1399,43 @@ textarea:focus-visible {
     border-radius: 12px;
   }
 }
+
+.arrange-selected-line {
+  min-height: 54px;
+  border: 2px dashed #b9c5d4;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.arrange-token-bank {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.arrange-token {
+  border: 1px solid #aebaca;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.94rem;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.arrange-token.selected {
+  border-color: #4e637b;
+  background: #eaf0f6;
+}
+
+.arrange-token:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
