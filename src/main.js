@@ -89,6 +89,7 @@ const state = {
   arrangeShowAnswerMap: [],
   arrangeTypedAnswers: [],
   arrangeFeedbackMap: [],
+  arrangeWordBankMap: [],
 }
 
 let renderScheduled = false
@@ -219,6 +220,24 @@ function normalizeArrangeSentence(text) {
   return String(text || '').trim().replace(/\s+/g, ' ')
 }
 
+function buildArrangeWordBankFromSentence(sentence) {
+  const normalized = normalizeArrangeSentence(sentence)
+  if (!normalized) return []
+
+  const tokens = normalized.split(' ').filter(Boolean)
+  if (tokens.length <= 1) return tokens
+
+  let shuffled = getShuffledItems(tokens)
+  let attempts = 0
+
+  while (attempts < 6 && shuffled.every((token, index) => token === tokens[index])) {
+    shuffled = getShuffledItems(tokens)
+    attempts += 1
+  }
+
+  return shuffled
+}
+
 function buildArrangeSessionIndexes(totalQuestions) {
   const cappedTotal = Math.max(0, Number(totalQuestions) || 0)
   if (!cappedTotal) return []
@@ -231,12 +250,18 @@ function buildArrangeSessionIndexes(totalQuestions) {
 
 function resetArrangeSession(totalQuestions) {
   const total = Math.max(0, Number(totalQuestions) || 0)
+  const sourceItems = state.database.questions.arrange || []
+
   state.arrangeSessionIndexes = buildArrangeSessionIndexes(total)
   state.arrangeCurrentIndex = 0
   state.arrangeCheckedMap = Array(total).fill(false)
   state.arrangeShowAnswerMap = Array(total).fill(false)
   state.arrangeFeedbackMap = Array(total).fill('')
   state.arrangeTypedAnswers = Array(total).fill('')
+  state.arrangeWordBankMap = Array.from({ length: total }, (_, index) => {
+    const sentence = sourceItems[index]?.answer || ''
+    return buildArrangeWordBankFromSentence(sentence)
+  })
 }
 
 function scoreArrange() {
@@ -1429,6 +1454,7 @@ function renderArrangePage() {
   const typedAnswer = state.arrangeTypedAnswers[activeQuestionIndex] || ''
   const builtSentence = normalizeArrangeSentence(typedAnswer)
   const expectedSentence = normalizeArrangeSentence(currentItem?.answer)
+  const shuffledWords = state.arrangeWordBankMap[activeQuestionIndex] || buildArrangeWordBankFromSentence(expectedSentence)
   const isExactMatch = builtSentence === expectedSentence
   const currentChecked = Boolean(state.arrangeCheckedMap[activeQuestionIndex])
   const currentShowAnswer = Boolean(state.arrangeShowAnswerMap[activeQuestionIndex])
@@ -1457,11 +1483,16 @@ function renderArrangePage() {
             <article class="question-card">
               <h3 class="question-title">
                 <span class="question-order">Câu ngẫu nhiên (${checkedCount}/${totalCount} đã đúng)</span>
-                <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
+                <span class="question-text">${escapeHtml(currentItem.prompt || 'Sắp xếp lại các từ để tạo thành câu tiếng Anh hoàn chỉnh.')}</span>
               </h3>
-              <p class="question-hint">${escapeHtml(currentItem.hint || 'Nhập lại câu đúng vào ô bên dưới.')}</p>
-              <p class="muted">Hệ thống sẽ chuẩn hóa khoảng trắng và kiểm tra chính xác theo từng ký tự của câu bạn nhập.</p>
-              <textarea data-arrange-index="${activeQuestionIndex}" rows="4" placeholder="Nhập câu đúng tại đây">${escapeHtml(typedAnswer)}</textarea>
+              <p class="question-hint">${escapeHtml(currentItem.hint || 'Quan sát các từ bị xáo trộn và gõ lại câu tiếng Anh đúng.')}</p>
+              <div class="arrange-word-bank" aria-label="Các từ đã được xáo trộn">
+                ${shuffledWords.length
+                  ? shuffledWords.map((word) => `<span class="arrange-word-chip">${escapeHtml(word)}</span>`).join('')
+                  : '<span class="muted">Không có dữ liệu từ để xáo trộn.</span>'}
+              </div>
+              <p class="muted">Hãy gõ câu hoàn chỉnh vào ô bên dưới. Hệ thống chuẩn hóa khoảng trắng và chấm đúng theo toàn bộ câu.</p>
+              <textarea data-arrange-index="${activeQuestionIndex}" rows="3" placeholder="Ví dụ: I like apples.">${escapeHtml(typedAnswer)}</textarea>
               <p class="muted">Bạn đã nhập: <strong>${escapeHtml(builtSentence || '(trống)')}</strong></p>
               ${feedbackText ? `<p class="notice ${currentChecked ? 'ok' : 'error'}">${escapeHtml(feedbackText)}</p>` : ''}
               ${currentChecked
@@ -2023,9 +2054,9 @@ function renderSourceQuestion() {
 
       <h3>Thêm câu hỏi sắp xếp câu</h3>
       <form id="arrange-question-form" class="stack-form">
-        <label>Nội dung câu hỏi<input name="prompt" required placeholder="Sắp xếp thành câu đúng: I / like / apples" /></label>
+        <label>Câu tiếng Anh cần sắp xếp<input name="sentence" required placeholder="I like apples." /></label>
         <label>Gợi ý<input name="hint" placeholder="Bắt đầu bằng chữ I" /></label>
-        <label>Câu đúng<input name="answer" required placeholder="I like apples." /></label>
+        <label>Nội dung yêu cầu (tuỳ chọn)<input name="prompt" placeholder="Sắp xếp thành câu tiếng Anh hoàn chỉnh." /></label>
         <button type="submit">Lưu câu hỏi sắp xếp</button>
       </form>
 
@@ -2339,12 +2370,13 @@ function attachExerciseEvents() {
     if (form.id === 'arrange-question-form') {
       event.preventDefault()
       const formData = new FormData(form)
-      const prompt = String(formData.get('prompt') || '').trim()
+      const sentence = normalizeArrangeSentence(formData.get('sentence'))
       const hint = String(formData.get('hint') || '').trim()
-      const answer = normalizeArrangeSentence(formData.get('answer'))
+      const promptInput = String(formData.get('prompt') || '').trim()
+      const prompt = promptInput || 'Sắp xếp lại các từ để tạo thành câu tiếng Anh hoàn chỉnh.'
 
-      if (!prompt || !answer) {
-        state.sourceMessage = 'Bạn cần nhập đầy đủ câu hỏi và câu đúng cho bài sắp xếp.'
+      if (!sentence) {
+        state.sourceMessage = 'Bạn cần nhập câu tiếng Anh cho bài sắp xếp.'
         state.sourceMessageType = 'error'
         render()
         return
@@ -2356,7 +2388,7 @@ function attachExerciseEvents() {
             type: 'arrange',
             prompt,
             hint,
-            answer,
+            answer: sentence,
           })
           form.reset()
         },

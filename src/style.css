@@ -1439,3 +1439,20 @@ textarea:focus-visible {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+.arrange-word-bank {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.arrange-word-chip {
+  border: 1px solid #aebaca;
+  border-radius: 999px;
+  background: #f3f7fb;
+  color: var(--ink);
+  font-size: 0.93rem;
+  padding: 6px 11px;
+  line-height: 1.2;
+}
