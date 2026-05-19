@@ -40,11 +40,14 @@ create table if not exists public.writing_questions (
   word text not null,
   hint text not null,
   keywords jsonb not null default '[]'::jsonb,
+  answer text not null default '',
   created_at timestamptz not null default now()
 );
 
 alter table if exists public.writing_questions
   add column if not exists kind text not null default 'writing';
+alter table if exists public.writing_questions
+  add column if not exists answer text not null default '';
 
 -- Migrate legacy listing table into writing_questions (shared table design).
 do $$

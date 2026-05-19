@@ -39,11 +39,89 @@ app.use((req, _, next) => {
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 const shouldSeedSampleData = process.env.ENABLE_SAMPLE_SEED === 'true'
-const supabase = supabaseUrl && supabaseKey
+let supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey, {
     auth: { persistSession: false },
   })
   : null
+
+// Simple in-memory mock Supabase for local development/testing when real
+// Supabase credentials are not provided. Enable by setting
+// `NODE_ENV=development` or `FORCE_LOCAL_MOCK=true` in your environment.
+function createMockSupabase() {
+  const tables = {
+    vocabulary: [],
+    mcq_questions: [],
+    matching_questions: [],
+    fill_blank_questions: [],
+    writing_questions: [],
+  }
+
+  function deepCopy(v) { return JSON.parse(JSON.stringify(v)) }
+
+  function from(table) {
+    if (!Object.prototype.hasOwnProperty.call(tables, table)) tables[table] = []
+
+    return {
+      select: async (cols, opts) => {
+        if (opts && opts.head) {
+          return { count: tables[table].length, error: null }
+        }
+        return { data: deepCopy(tables[table]).reverse(), error: null }
+      },
+      insert: async (rows) => {
+        const arr = Array.isArray(rows) ? rows : [rows]
+        arr.forEach((row) => {
+          const id = tables[table].length ? (tables[table][tables[table].length - 1].id || tables[table].length) + 1 : 1
+          tables[table].push({ id, ...deepCopy(row), created_at: new Date().toISOString() })
+        })
+        return { error: null }
+      },
+      update: (payload) => ({
+        eq: async (field, value) => {
+          const id = Number(value)
+          let found = false
+          for (let i = 0; i < tables[table].length; i += 1) {
+            if (String(tables[table][i][field]) === String(value)) {
+              tables[table][i] = { ...tables[table][i], ...deepCopy(payload) }
+              found = true
+            }
+          }
+          return { error: found ? null : { message: 'not found' } }
+        },
+      }),
+      delete: () => ({
+        eq: async (field, value) => {
+          const before = tables[table].length
+          for (let i = tables[table].length - 1; i >= 0; i -= 1) {
+            if (String(tables[table][i][field]) === String(value)) tables[table].splice(i, 1)
+          }
+          const after = tables[table].length
+          return { error: before === after ? { message: 'not found' } : null }
+        },
+      }),
+    }
+  }
+
+  // seed a few items to make UI usable for testing
+  ;(async () => {
+    await from('writing_questions').insert([
+      { word: 'Sắp xếp thành câu hoàn chỉnh.', hint: 'Bắt đầu bằng chủ ngữ "She".', keywords: ['She goes to school every day.'], kind: 'arrange' },
+    ])
+    await from('vocabulary').insert([
+      { word: 'resilient', definition: 'Có khả năng phục hồi nhanh sau tình huống khó khăn.', example: '' },
+    ])
+    await from('mcq_questions').insert([
+      { question: 'Chọn từ đồng nghĩa với "rapid".', option_a: 'slow', option_b: 'quick', option_c: 'tiny', option_d: 'silent', answer: 'quick', mode: 'general' },
+    ])
+  })()
+
+  return { from }
+}
+
+if (!supabase && (process.env.NODE_ENV === 'development' || process.env.FORCE_LOCAL_MOCK === 'true')) {
+  supabase = createMockSupabase()
+}
 
 let initPromise
 const DATABASE_RESPONSE_CACHE_TTL_MS = 15_000
@@ -81,11 +159,13 @@ function toQuestionType(type) {
   if (type === 'fillBlank') return 'fillBlank'
   if (type === 'writing') return 'writing'
   if (type === 'listing') return 'listing'
+  if (type === 'arrange') return 'arrange'
   return null
 }
 
 function toWritingKind(value) {
   if (value === 'listing') return 'listing'
+  if (value === 'arrange') return 'arrange'
   return 'writing'
 }
 
@@ -455,8 +535,9 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     fetchWritingRows(),
   ])
 
-  const writingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) !== 'listing')
+  const writingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) !== 'listing' && toWritingKind(row.kind) !== 'arrange')
   const listingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'listing')
+  const arrangeRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'arrange')
 
   const vocabularyAnswerRows = vocabularyRows
     .map((row) => ({
@@ -530,6 +611,12 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         word: row.word,
         hint: row.hint,
         keywords: Array.isArray(row.keywords) ? row.keywords : [],
+      })),
+      arrange: arrangeRows.map((row) => ({
+        id: row.id,
+        prompt: row.word,
+        hint: row.hint,
+        answer: Array.isArray(row.keywords) ? String(row.keywords[0] || '') : String(row.answer || ''),
       })),
       listing: listingRows.map((row) => ({
         id: row.id,
@@ -714,6 +801,27 @@ app.post('/api/questions', async (req, res, next) => {
       assertNoSupabaseError(error, 'Không thể thêm đề viết')
     }
 
+    if (type === 'arrange') {
+      const prompt = String(req.body.prompt || req.body.word || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answer = String(req.body.answer || '').trim()
+
+      if (!prompt || !answer) {
+        return res.status(400).json({ message: 'Dữ liệu bài sắp xếp không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('writing_questions').insert([
+        {
+          word: prompt,
+          hint,
+          keywords: [answer],
+          answer,
+          kind: 'arrange',
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi sắp xếp')
+    }
+
     if (type === 'listing') {
       const prompt = String(req.body.prompt || '').trim()
       const hint = String(req.body.hint || '').trim()
@@ -787,6 +895,21 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
         })
         .eq('id', id)
       assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi trắc nghiệm')
+      clearDatabaseResponseCache()
+    }
+
+    if (type === 'arrange') {
+      const prompt = String(req.body.prompt || req.body.word || '').trim()
+      const hint = String(req.body.hint || '').trim()
+      const answer = String(req.body.answer || '').trim()
+
+      if (!prompt || !answer) return res.status(400).json({ message: 'Dữ liệu bài sắp xếp không hợp lệ' })
+
+      const { error } = await supabase
+        .from('writing_questions')
+        .update({ word: prompt, hint, keywords: [answer], answer, kind: 'arrange' })
+        .eq('id', id)
+      assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi sắp xếp')
       clearDatabaseResponseCache()
     }
 
@@ -894,6 +1017,18 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
     if (type === 'listing') {
       const { error } = await supabase.from('writing_questions').delete().eq('id', id)
       assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
+      clearDatabaseResponseCache()
+    }
+
+    if (type === 'arrange') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi sắp xếp')
+      clearDatabaseResponseCache()
+    }
+
+    if (type === 'arrange') {
+      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
+      assertNoSupabaseError(error, 'Không thể xóa câu hỏi sắp xếp')
       clearDatabaseResponseCache()
     }
 

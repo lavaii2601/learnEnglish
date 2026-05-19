@@ -39,11 +39,66 @@ app.use((req, _, next) => {
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 const shouldSeedSampleData = process.env.ENABLE_SAMPLE_SEED === 'true'
-const supabase = supabaseUrl && supabaseKey
+let supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey, {
     auth: { persistSession: false },
   })
   : null
+
+function createMockSupabase() {
+  const tables = {
+    vocabulary: [],
+    mcq_questions: [],
+    matching_questions: [],
+    fill_blank_questions: [],
+    writing_questions: [],
+  }
+  function deepCopy(v) { return JSON.parse(JSON.stringify(v)) }
+  function from(table) {
+    if (!Object.prototype.hasOwnProperty.call(tables, table)) tables[table] = []
+    return {
+      select: async (cols, opts) => {
+        if (opts && opts.head) return { count: tables[table].length, error: null }
+        return { data: deepCopy(tables[table]).reverse(), error: null }
+      },
+      insert: async (rows) => {
+        const arr = Array.isArray(rows) ? rows : [rows]
+        arr.forEach((row) => {
+          const id = tables[table].length ? (tables[table][tables[table].length - 1].id || tables[table].length) + 1 : 1
+          tables[table].push({ id, ...deepCopy(row), created_at: new Date().toISOString() })
+        })
+        return { error: null }
+      },
+      update: (payload) => ({ eq: async (field, value) => {
+        let found = false
+        for (let i = 0; i < tables[table].length; i += 1) {
+          if (String(tables[table][i][field]) === String(value)) {
+            tables[table][i] = { ...tables[table][i], ...deepCopy(payload) }
+            found = true
+          }
+        }
+        return { error: found ? null : { message: 'not found' } }
+      } }),
+      delete: () => ({ eq: async (field, value) => {
+        const before = tables[table].length
+        for (let i = tables[table].length - 1; i >= 0; i -= 1) {
+          if (String(tables[table][i][field]) === String(value)) tables[table].splice(i, 1)
+        }
+        return { error: before === tables[table].length ? { message: 'not found' } : null }
+      } }),
+    }
+  }
+  ;(async () => {
+    await from('writing_questions').insert([
+      { word: 'Sắp xếp thành câu hoàn chỉnh.', hint: 'Bắt đầu bằng chủ ngữ "She".', keywords: ['She goes to school every day.'], kind: 'arrange' },
+    ])
+  })()
+  return { from }
+}
+
+if (!supabase && (process.env.NODE_ENV === 'development' || process.env.FORCE_LOCAL_MOCK === 'true')) {
+  supabase = createMockSupabase()
+}
 
 let initPromise
 const DATABASE_RESPONSE_CACHE_TTL_MS = 15_000
