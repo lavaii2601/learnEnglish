@@ -90,7 +90,7 @@ function createMockSupabase() {
   }
   ;(async () => {
     await from('writing_questions').insert([
-      { word: 'Sắp xếp thành câu hoàn chỉnh.', hint: 'Bắt đầu bằng chủ ngữ "She".', keywords: ['She goes to school every day.'], kind: 'arrange' },
+      { word: 'Sắp xếp thành câu hoàn chỉnh.', hint: 'Bắt đầu bằng chủ ngữ "She".', answer: 'She goes to school every day.', kind: 'arrange' },
     ])
   })()
   return { from }
@@ -365,7 +365,7 @@ async function fetchFillRows() {
 async function fetchWritingRows() {
   const { data, error } = await supabase
     .from('writing_questions')
-    .select('id, word, hint, keywords, kind')
+    .select('id, word, hint, keywords, answer, kind')
     .order('id', { ascending: false })
   assertNoSupabaseError(error, 'Không thể tải câu hỏi viết')
   return data || []
@@ -606,7 +606,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         id: row.id,
         prompt: row.word,
         hint: row.hint,
-        answer: Array.isArray(row.keywords) ? String(row.keywords[0] || '').trim() : '',
+        answer: String(row.answer || (Array.isArray(row.keywords) ? row.keywords[0] : '') || '').trim(),
       })),
     },
   }
@@ -822,7 +822,7 @@ app.post('/api/questions', async (req, res, next) => {
         {
           word: prompt,
           hint,
-          keywords: [answer],
+          answer,
           kind: 'arrange',
         },
       ])
@@ -956,7 +956,7 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
 
       const { error } = await supabase
         .from('writing_questions')
-        .update({ word: prompt, hint, keywords: [answer], kind: 'arrange' })
+        .update({ word: prompt, hint, answer, kind: 'arrange' })
         .eq('id', id)
       assertNoSupabaseError(error, 'Không thể cập nhật câu hỏi sắp xếp')
       clearDatabaseResponseCache()
