@@ -863,6 +863,27 @@ textarea {
   gap: 8px;
 }
 
+.word-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+
+.word-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #b7c3d2;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f8fbff 0%, #edf3fa 100%);
+  color: #1f2b3a;
+  font-weight: 600;
+  box-shadow: 0 1px 0 rgba(31, 41, 55, 0.04);
+}
+
 .listing-review-item {
   border: 2px solid #c4cdda;
   border-radius: 10px;

@@ -219,6 +219,16 @@ function normalizeArrangeSentence(text) {
   return String(text || '').trim().replace(/\s+/g, ' ')
 }
 
+function getShuffledArrangeWords(sentence) {
+  const words = normalizeArrangeSentence(sentence)
+    .split(' ')
+    .map((word) => word.trim())
+    .filter(Boolean)
+
+  if (words.length <= 1) return words
+  return getShuffledItems(words)
+}
+
 function buildArrangeSessionIndexes(totalQuestions) {
   const cappedTotal = Math.max(0, Number(totalQuestions) || 0)
   if (!cappedTotal) return []
@@ -1429,6 +1439,7 @@ function renderArrangePage() {
   const typedAnswer = state.arrangeTypedAnswers[activeQuestionIndex] || ''
   const builtSentence = normalizeArrangeSentence(typedAnswer)
   const expectedSentence = normalizeArrangeSentence(currentItem?.answer)
+  const shuffledWords = getShuffledArrangeWords(currentItem?.answer)
   const isExactMatch = builtSentence === expectedSentence
   const currentChecked = Boolean(state.arrangeCheckedMap[activeQuestionIndex])
   const currentShowAnswer = Boolean(state.arrangeShowAnswerMap[activeQuestionIndex])
@@ -1460,6 +1471,12 @@ function renderArrangePage() {
                 <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
               </h3>
               <p class="question-hint">${escapeHtml(currentItem.hint || 'Nhập lại câu đúng vào ô bên dưới.')}</p>
+              <p class="muted">Sắp xếp lại các từ sau để tạo thành câu đúng:</p>
+              <div class="word-chip-row">
+                ${shuffledWords.length
+          ? shuffledWords.map((word) => `<span class="word-chip">${escapeHtml(word)}</span>`).join('')
+          : '<span class="muted">(Chưa có từ để trộn)</span>'}
+              </div>
               <p class="muted">Hệ thống sẽ chuẩn hóa khoảng trắng và kiểm tra chính xác theo từng ký tự của câu bạn nhập.</p>
               <textarea data-arrange-index="${activeQuestionIndex}" rows="4" placeholder="Nhập câu đúng tại đây">${escapeHtml(typedAnswer)}</textarea>
               <p class="muted">Bạn đã nhập: <strong>${escapeHtml(builtSentence || '(trống)')}</strong></p>
