@@ -741,6 +741,21 @@ p {
   background: transparent;
 }
 
+.writing-answer-input {
+  width: 100%;
+  min-height: 112px;
+  border: 1px solid #a5b4fc;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.08);
+}
+
+.writing-answer-input:focus {
+  border-color: var(--brand);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.14);
+}
+
 .exercise-check-btn {
   width: 100%;
   min-height: 42px;

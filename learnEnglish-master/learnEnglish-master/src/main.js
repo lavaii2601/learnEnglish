@@ -58,6 +58,9 @@ const state = {
   fillCheckedMap: [],
   fillFeedbackMap: [],
   writingAnswers: [],
+  writingCurrentIndex: 0,
+  writingCheckedMap: [],
+  writingFeedbackMap: [],
   listingAnswers: [],
   listingQuestionCount: 5,
   listingSessionIndexes: [],
@@ -605,7 +608,10 @@ function resetExerciseState() {
   state.fillCurrentIndex = 0
   state.fillCheckedMap = Array(fillBlank.length).fill(false)
   state.fillFeedbackMap = Array(fillBlank.length).fill('')
-  state.writingAnswers = Array(writing.length).fill('')
+  state.writingAnswers = Array(state.database.questions.mcq.length).fill('')
+  state.writingCurrentIndex = 0
+  state.writingCheckedMap = Array(state.database.questions.mcq.length).fill(false)
+  state.writingFeedbackMap = Array(state.database.questions.mcq.length).fill('')
   state.listingAnswers = Array(listing.length).fill('')
   resetListingSession(listing.length)
   state.listingPreparedDirty = true
@@ -981,39 +987,12 @@ function scoreBlanks() {
 function scoreWriting() {
   if (!state.writingScoreDirty) return state.writingScoreCache
 
-  const scores = state.database.questions.writing.map((item, index) => {
-    const expectedLines = (Array.isArray(item.keywords) ? item.keywords : [])
-      .map((line) => normalizeListLine(line))
-      .filter(Boolean)
-    const userLines = parseAnswerLines(state.writingAnswers[index] || '')
-
-    const remainingUserLines = [...userLines]
-    let hitCount = 0
-
-    expectedLines.forEach((expectedLine) => {
-      const exactIndex = remainingUserLines.findIndex((line) => line === expectedLine)
-      if (exactIndex >= 0) {
-        hitCount += 1
-        remainingUserLines.splice(exactIndex, 1)
-        return
-      }
-
-      const fuzzyIndex = remainingUserLines.findIndex((line) => linesMatch(line, expectedLine))
-      if (fuzzyIndex >= 0) {
-        hitCount += 1
-        remainingUserLines.splice(fuzzyIndex, 1)
-      }
-    })
-
-    const totalExpected = expectedLines.length
-    const percent = totalExpected
-      ? Math.round((hitCount / totalExpected) * 100)
-      : 0
-
+  const scores = state.database.questions.mcq.map((item, index) => {
+    const isCorrect = normalizeText(state.writingAnswers[index] || '') === normalizeText(item.answer || '')
     return {
-      hitCount,
-      total: totalExpected,
-      percent,
+      hitCount: isCorrect ? 1 : 0,
+      total: 1,
+      percent: isCorrect ? 100 : 0,
     }
   })
   state.writingScoreCache = scores
@@ -1141,8 +1120,8 @@ function openResultNotice(type) {
   if (type === 'writing') {
     const writingScores = scoreWriting()
     correct = getWritingCorrectCount(writingScores)
-    total = state.database.questions.writing.length
-    title = 'Kết quả viết định nghĩa'
+    total = state.database.questions.mcq.length
+    title = 'Kết quả viết câu trả lời'
   }
 
   if (type === 'listing') {
@@ -1199,12 +1178,12 @@ function renderLayout(content) {
   const mcqTotalCount = vocabularyCount + questionAnswerCount
   const matchingCount = state.database.questions.matching.length
   const fillBlankCount = state.database.questions.fillBlank.length
-  const writingCount = state.database.questions.writing.length
+  const writingDataCount = state.database.questions.writing.length
   const totalQuestions =
     questionAnswerCount +
     matchingCount +
     fillBlankCount +
-    writingCount +
+    writingDataCount +
     (state.database.questions.listing || []).length +
     (state.database.questions.arrange || []).length
   const listingCount = (state.database.questions.listing || []).length
@@ -1226,7 +1205,7 @@ function renderLayout(content) {
       <article><span>Tổng nguồn trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
       <article><span>Nối từ</span><strong>${matchingCount}</strong></article>
       <article><span>Điền chỗ trống</span><strong>${fillBlankCount}</strong></article>
-      <article><span>Viết</span><strong>${writingCount}</strong></article>
+      <article><span>Viết (câu hỏi + trả lời)</span><strong>${questionAnswerCount}</strong></article>
       <article><span>Liệt kê</span><strong>${listingCount}</strong></article>
       <article><span>Sắp xếp câu</span><strong>${arrangeCount}</strong></article>
     </div>
@@ -1446,7 +1425,7 @@ function renderHome() {
   const mcqCount = getMcqExerciseItems().length
   const matchingCount = state.database.questions.matching.length
   const blankCount = state.database.questions.fillBlank.length
-  const writingCount = state.database.questions.writing.length
+  const writingCount = state.database.questions.mcq.length
   const listingCount = (state.database.questions.listing || []).length
   const arrangeCount = (state.database.questions.arrange || []).length
   const masteredCount = state.database.vocabulary.filter((item) => (item.masteredCount || 0) >= MASTERED_THRESHOLD).length
@@ -1816,7 +1795,7 @@ function renderMatchingPage() {
             <svg class="matching-lines" data-matching-lines aria-hidden="true"></svg>
             <div class="matching-board">
               <section class="matching-column">
-                <h3>Tiếng Anh</h3>
+                <h3>Cột A</h3>
                   ${leftColumn
       .map((item) => {
         const matchedRightId = Number(state.matchingPairs[item.id])
@@ -1839,7 +1818,7 @@ function renderMatchingPage() {
               </section>
 
               <section class="matching-column">
-                <h3>Tiếng Việt</h3>
+                <h3>Cột B</h3>
                   ${rightColumn
       .map((item) => {
         const ownerLeftId = Number(rightOwnershipMap[String(item.id)] || 0)
@@ -1871,31 +1850,38 @@ function renderMatchingPage() {
 }
 
 function renderWritingPage() {
-  const items = state.database.questions.writing
-  const scores = scoreWriting()
-  const correctCount = getWritingCorrectCount(scores)
+  const items = state.database.questions.mcq || []
+  const currentIndex = Math.max(0, Math.min(state.writingCurrentIndex, Math.max(items.length - 1, 0)))
+  const item = items[currentIndex]
+  const answer = state.writingAnswers[currentIndex] || ''
+  const checked = Boolean(state.writingCheckedMap[currentIndex])
+  const feedback = state.writingFeedbackMap[currentIndex] || ''
 
   return `
-    <section class="page-card">
-      <h2>Viết định nghĩa</h2>
-      ${items
-        .map(
-          (item, index) => `
-            <article class="question-card">
-              <h3 class="question-title">
-                <span class="question-order">Từ cần định nghĩa</span>
-                <span class="question-text">${escapeHtml(item.word)}</span>
-              </h3>
-              <p class="question-hint">${escapeHtml(item.hint)}</p>
-              <p class="muted">Mỗi dòng là 1 ý/1 đáp án. Có thể dùng -, *, hoặc số thứ tự. Không cần đúng thứ tự.</p>
-              <textarea data-writing-index="${index}" rows="5" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3">${escapeHtml(state.writingAnswers[index] || '')}</textarea>
-              <p class="muted">Độ khớp theo dòng: <strong>${scores[index].percent}%</strong> (${scores[index].hitCount}/${scores[index].total})</p>
-            </article>
-          `,
-        )
-        .join('')}
-      <p class="score-line">Câu đạt yêu cầu (>= 60%): <strong>${correctCount}/${items.length}</strong></p>
-      <button type="button" class="action-btn" data-check-result="writing">Kiểm tra kết quả</button>
+    <section class="page-card focused-exercise">
+      <header class="exercise-page-heading">
+        <h2>Viết câu trả lời</h2>
+        <span>${items.length ? currentIndex + 1 : 0}/${items.length}</span>
+      </header>
+      ${item
+      ? `
+          <article class="exercise-prompt-card">
+            <span class="exercise-eyebrow">Câu hỏi</span>
+            <strong>${escapeHtml(item.question)}</strong>
+          </article>
+          <textarea
+            class="writing-answer-input"
+            data-writing-index="${currentIndex}"
+            rows="4"
+            placeholder="Nhập câu trả lời của bạn..."
+          >${escapeHtml(answer)}</textarea>
+          ${feedback ? `<p class="notice ${checked ? 'ok' : 'error'}" data-writing-feedback>${escapeHtml(feedback)}</p>` : ''}
+          <button type="button" class="action-btn exercise-check-btn" data-writing-check ${answer.trim() ? '' : 'disabled'}>Kiểm tra</button>
+          ${checked
+          ? `<button type="button" class="small-btn exercise-next-btn" data-writing-next data-writing-next-button>${currentIndex + 1 < items.length ? 'Câu tiếp theo' : 'Làm lại từ đầu'}</button>`
+          : ''}
+        `
+      : '<p class="muted">Chưa có dữ liệu câu hỏi + câu trả lời.</p>'}
     </section>
   `
 }
@@ -2304,8 +2290,15 @@ function attachExerciseEvents() {
     }
 
     if (target.matches('textarea[data-writing-index]')) {
-      state.writingAnswers[Number(target.dataset.writingIndex)] = target.value
+      const index = Number(target.dataset.writingIndex)
+      state.writingAnswers[index] = target.value
+      state.writingCheckedMap[index] = false
+      state.writingFeedbackMap[index] = ''
       state.writingScoreDirty = true
+      const checkButton = app.querySelector('[data-writing-check]')
+      if (checkButton) checkButton.disabled = !target.value.trim()
+      app.querySelector('[data-writing-feedback]')?.remove()
+      app.querySelector('[data-writing-next-button]')?.remove()
       return
     }
 
@@ -2752,6 +2745,34 @@ function attachExerciseEvents() {
         state.blankAnswers = Array(state.database.questions.fillBlank.length).fill('')
         state.fillCheckedMap = Array(state.database.questions.fillBlank.length).fill(false)
         state.fillFeedbackMap = Array(state.database.questions.fillBlank.length).fill('')
+      }
+      render()
+      return
+    }
+
+    if (button?.matches('[data-writing-check]')) {
+      const index = state.writingCurrentIndex
+      const item = state.database.questions.mcq[index]
+      if (!item) return
+      const isCorrect = normalizeText(state.writingAnswers[index] || '') === normalizeText(item.answer || '')
+      state.writingCheckedMap[index] = isCorrect
+      state.writingFeedbackMap[index] = isCorrect
+        ? 'Chính xác!'
+        : 'Chưa đúng, hãy kiểm tra lại câu trả lời.'
+      state.writingScoreDirty = true
+      render()
+      return
+    }
+
+    if (button?.matches('[data-writing-next]')) {
+      if (state.writingCurrentIndex + 1 < state.database.questions.mcq.length) {
+        state.writingCurrentIndex += 1
+      } else {
+        state.writingCurrentIndex = 0
+        state.writingAnswers = Array(state.database.questions.mcq.length).fill('')
+        state.writingCheckedMap = Array(state.database.questions.mcq.length).fill(false)
+        state.writingFeedbackMap = Array(state.database.questions.mcq.length).fill('')
+        state.writingScoreDirty = true
       }
       render()
       return
