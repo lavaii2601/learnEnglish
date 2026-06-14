@@ -3,14 +3,34 @@ const API_BASE = import.meta.env.VITE_API_URL
     ? `${window.location.protocol}//${window.location.hostname}:3001`
     : '')
 
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  })
+  const { retry = 0, ...fetchOptions } = options
+  let response
+
+  for (let attempt = 0; attempt <= retry; attempt += 1) {
+    try {
+      response = await fetch(`${API_BASE}${path}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(fetchOptions.headers || {}),
+        },
+        ...fetchOptions,
+      })
+    } catch (error) {
+      if (attempt >= retry) throw error
+      await wait(500 * (attempt + 1))
+      continue
+    }
+
+    if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt >= retry) break
+    await wait(500 * (attempt + 1))
+  }
 
   if (!response.ok) {
     let message = `Yêu cầu thất bại (HTTP ${response.status})`
@@ -45,7 +65,7 @@ export function fetchDatabase(options = {}) {
     params.set('fresh', '1')
   }
   const query = params.toString()
-  return request(`/api/database${query ? `?${query}` : ''}`)
+  return request(`/api/database${query ? `?${query}` : ''}`, { retry: 2 })
 }
 
 export function createVocabulary(payload) {

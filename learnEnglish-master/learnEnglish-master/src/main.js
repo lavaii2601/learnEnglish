@@ -1402,6 +1402,15 @@ async function loadDataForCurrentRoute() {
   render()
 }
 
+async function preloadDatabase() {
+  try {
+    const payload = await fetchDatabase()
+    saveDatabaseCache(payload)
+  } catch {
+    // The normal route loader will show an actionable error if preloading fails.
+  }
+}
+
 async function withRefresh(action, successMessage) {
   try {
     await action()
@@ -3155,12 +3164,14 @@ async function bootstrap() {
     setRoute('/home')
     state.loading = false
     render()
+    void preloadDatabase()
     return
   }
 
   if (state.route === '/home') {
     state.loading = false
     render()
+    void preloadDatabase()
     return
   }
 
