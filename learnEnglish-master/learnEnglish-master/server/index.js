@@ -567,6 +567,13 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
   const vocabularyExerciseAnswerRows = vocabularyAnswerRows
   const questionExerciseAnswerRows = questionMcqAnswerRows
 
+  // Computed once per mcq_questions row and reused for mcqExercise entries with
+  // source === 'question', since both use identical inputs (createMcqOptions
+  // is O(n log n) per call, so this avoids doubling that cost).
+  const questionMcqOptionsById = new Map(
+    mcqRows.map((row) => [row.id, createMcqOptions(row.answer, questionExerciseAnswerRows, row.question)]),
+  )
+
   return {
     vocabulary: vocabularyRows,
     questions: {
@@ -574,7 +581,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         id: row.id,
         question: row.question,
         mode: toMcqMode(row.mode),
-        options: createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
+        options: questionMcqOptionsById.get(row.id),
         answer: row.answer,
       })),
       mcqExercise: shuffledMcqExerciseRows.map((row) => ({
@@ -585,7 +592,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
         options:
           row.source === 'vocabulary'
             ? createMcqOptions(row.answer, vocabularyExerciseAnswerRows, row.question)
-            : createMcqOptions(row.answer, questionExerciseAnswerRows, row.question),
+            : questionMcqOptionsById.get(row.id),
         answer: row.answer,
       })),
       matching: matchingRows,

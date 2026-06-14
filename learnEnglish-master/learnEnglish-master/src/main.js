@@ -101,7 +101,7 @@ function isSourceRoute(route) {
 }
 
 function cloneDatabasePayload(payload) {
-  return JSON.parse(JSON.stringify(payload))
+  return structuredClone(payload)
 }
 
 function getDatabaseCacheKey() {
@@ -155,25 +155,24 @@ function getCachedDatabaseEntry() {
 
   const persistentEntry = getPersistentDatabaseEntry(key)
   if (!persistentEntry) return null
+  // persistentEntry.data was just JSON.parse'd from storage, so it's already a fresh object - no clone needed.
   state.databaseCache[key] = {
     timestamp: Date.now(),
-    data: cloneDatabasePayload(persistentEntry.data),
+    data: persistentEntry.data,
   }
   return state.databaseCache[key]
 }
 
 function saveDatabaseCache(payload) {
   const key = getDatabaseCacheKey()
-  state.databaseCache[key] = {
-    timestamp: Date.now(),
-    data: cloneDatabasePayload(payload),
-  }
+  const timestamp = Date.now()
+  // payload comes fresh from the API response and is never mutated in place,
+  // so the in-memory and persistent caches can safely share the same object;
+  // JSON.stringify below serializes it for storage without needing a pre-clone.
+  state.databaseCache[key] = { timestamp, data: payload }
 
   const store = readPersistentDatabaseCacheStore()
-  store[key] = {
-    timestamp: Date.now(),
-    data: cloneDatabasePayload(payload),
-  }
+  store[key] = { timestamp, data: payload }
   writePersistentDatabaseCacheStore(store)
 }
 
@@ -1143,20 +1142,20 @@ function openResultNotice(type) {
   render()
 }
 
-function renderLayout(content) {
-  const routeTitleMap = {
-    '/home': 'Trang chủ',
-    '/exercise/mcq': 'Trắc nghiệm',
-    '/exercise/matching': 'Nối từ',
-    '/exercise/fill': 'Điền chỗ trống',
-    '/exercise/writing': 'Viết định nghĩa',
-    '/exercise/listing': 'Liệt kê ý',
-    '/exercise/arrange': 'Sắp xếp câu',
-    '/source/vocab': 'Thêm từ vựng',
-    '/source/questions': 'Thêm câu hỏi',
-    '/source/matching': 'Thêm từ nối',
-  }
+const ROUTE_TITLE_MAP = {
+  '/home': 'Trang chủ',
+  '/exercise/mcq': 'Trắc nghiệm',
+  '/exercise/matching': 'Nối từ',
+  '/exercise/fill': 'Điền chỗ trống',
+  '/exercise/writing': 'Viết định nghĩa',
+  '/exercise/listing': 'Liệt kê ý',
+  '/exercise/arrange': 'Sắp xếp câu',
+  '/source/vocab': 'Thêm từ vựng',
+  '/source/questions': 'Thêm câu hỏi',
+  '/source/matching': 'Thêm từ nối',
+}
 
+function renderLayout(content) {
   const sourceGroupOpen = state.sourceGroupOpen || isSourceRoute(state.route)
 
   const questionAnswerCount = state.database.questions.mcq.length
@@ -1284,7 +1283,7 @@ function renderLayout(content) {
               <span></span>
               <span></span>
             </button>
-            <p class="route-pill">${routeTitleMap[state.route] || 'Học tiếng Anh cùng Hồng Nga'}</p>
+            <p class="route-pill">${ROUTE_TITLE_MAP[state.route] || 'Học tiếng Anh cùng Hồng Nga'}</p>
           </div>
           <p class="muted">Dữ liệu đang truy xuất từ backend SQLite.</p>
         </header>
