@@ -7,6 +7,7 @@ import {
   fetchDatabase,
   updateQuestion,
   updateVocabulary,
+  updateVocabularyProgress,
 } from './api'
 
 const app = document.querySelector('#app')
@@ -14,6 +15,14 @@ const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
 const DATABASE_CACHE_TTL_MS = 30_000
 const PERSISTENT_DATABASE_CACHE_TTL_MS = 10 * 60_000
 const DATABASE_CACHE_STORAGE_KEY = 'english_lab_database_cache_v1'
+const WORD_TYPE_OPTIONS = [
+  { value: 'noun', label: 'Danh từ' },
+  { value: 'verb', label: 'Động từ' },
+  { value: 'adjective', label: 'Tính từ' },
+  { value: 'other', label: 'Khác' },
+]
+const WORD_TYPE_LABELS = Object.fromEntries(WORD_TYPE_OPTIONS.map((option) => [option.value, option.label]))
+const MASTERED_THRESHOLD = 2
 const ENCOURAGEMENT_IMAGES = Array.from({ length: 15 }, (_, index) => `/picture/${index + 1}.jpg`)
 const ENCOURAGEMENT_TEXTS = [
   'Bạn làm rất tốt, tiếp tục phát huy nhé!',
@@ -760,6 +769,11 @@ function renderEditDialog() {
   if (dialog.kind === 'vocab') {
     bodyMarkup = `
       <label>Từ<input name="word" required value="${escapeHtml(dialog.word || '')}" /></label>
+      <label>Loại từ
+        <select name="wordType">
+          ${WORD_TYPE_OPTIONS.map((option) => `<option value="${option.value}" ${dialog.wordType === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+        </select>
+      </label>
       <label>Định nghĩa<textarea name="definition" required rows="4">${escapeHtml(dialog.definition || '')}</textarea></label>
       <label>Ví dụ<textarea name="example" rows="3">${escapeHtml(dialog.example || '')}</textarea></label>
     `
@@ -841,9 +855,10 @@ async function submitEditDialog(formData) {
     const word = String(formData.get('word') || '').trim()
     const definition = String(formData.get('definition') || '').trim()
     const example = String(formData.get('example') || '').trim()
+    const wordType = String(formData.get('wordType') || 'other').trim()
     if (!word || !definition) return false
 
-    await updateVocabulary(id, { word, definition, example })
+    await updateVocabulary(id, { word, definition, example, wordType })
     state.editDialog = null
     return true
   }
@@ -1410,11 +1425,79 @@ function renderHome() {
   const writingCount = state.database.questions.writing.length
   const listingCount = (state.database.questions.listing || []).length
   const arrangeCount = (state.database.questions.arrange || []).length
+  const totalQuestions = mcqCount + matchingCount + blankCount + writingCount + listingCount + arrangeCount
+
+  const masteredCount = state.database.vocabulary.filter((item) => (item.masteredCount || 0) >= MASTERED_THRESHOLD).length
+  const needsReviewCount = vocabCount - masteredCount
+
+  const wordTypeOrder = ['verb', 'adjective', 'noun', 'other']
+  const wordTypeBreakdown = wordTypeOrder
+    .map((value) => ({
+      label: WORD_TYPE_LABELS[value],
+      count: state.database.vocabulary.filter((item) => (item.wordType || 'other') === value).length,
+    }))
+    .filter((entry) => entry.count > 0)
+
+  const exercises = [
+    { route: '/exercise/mcq', icon: '☑', label: 'Trắc nghiệm' },
+    { route: '/exercise/matching', icon: '⇄', label: 'Nối từ' },
+    { route: '/exercise/fill', icon: '▭', label: 'Điền chỗ trống' },
+    { route: '/exercise/writing', icon: '✎', label: 'Viết' },
+    { route: '/exercise/listing', icon: '≡', label: 'Liệt kê' },
+    { route: '/exercise/arrange', icon: '⇌', label: 'Sắp xếp câu' },
+  ]
 
   return `
-    <section class="page-card">
-      <h2>Học tiếng Anh cùng Hồng Nga</h2>
-      <p>Chọn tính năng ở menu bên trái. Mỗi bài tập sẽ được chấm dựa trên dữ liệu đang lưu trong cơ sở dữ liệu.</p>
+    <section class="page-card home-page">
+      <div class="home-greeting">
+        <h2>Xin chào! 👋</h2>
+        <p class="muted">Hôm nay bạn muốn luyện tập gì?</p>
+      </div>
+
+      <div class="stat-grid home-stat-grid">
+        <article class="home-stat-vocab"><strong>${vocabCount}</strong><span>Tổng từ vựng</span></article>
+        <article class="home-stat-mastered"><strong>${masteredCount}</strong><span>Đã thuộc (≥${MASTERED_THRESHOLD} lần)</span></article>
+        <article class="home-stat-review"><strong>${needsReviewCount}</strong><span>Cần ôn thêm</span></article>
+      </div>
+
+      <div class="home-section">
+        <p class="group-title">Bắt đầu luyện tập</p>
+        <div class="home-action-grid">
+          ${exercises
+      .map(
+        (item) => `
+            <button type="button" class="home-action-card" data-route="${item.route}">
+              <span class="home-action-icon">${item.icon}</span>
+              <span class="home-action-label">${item.label}</span>
+            </button>
+          `,
+      )
+      .join('')}
+        </div>
+      </div>
+
+      ${wordTypeBreakdown.length
+      ? `
+      <div class="home-section">
+        <p class="group-title">Từ theo loại</p>
+        <div class="word-type-grid">
+          ${wordTypeBreakdown
+          .map((entry) => {
+            const percent = vocabCount ? Math.round((entry.count / vocabCount) * 100) : 0
+            return `
+              <div class="word-type-row">
+                <span class="word-type-row-label">${entry.label}</span>
+                <div class="word-type-bar"><span class="word-type-bar-fill" style="width:${percent}%"></span></div>
+                <span class="word-type-row-value">${entry.count} từ · ${percent}%</span>
+              </div>
+            `
+          })
+          .join('')}
+        </div>
+      </div>
+      `
+      : ''}
+
       <div class="stat-grid">
         <article><strong>${vocabCount}</strong><span>Từ vựng</span></article>
         <article><strong>${mcqCount}</strong><span>Câu trắc nghiệm</span></article>
@@ -1954,6 +2037,11 @@ function renderSourceVocab() {
       <h2>Nhiệm vụ: Thêm từ vựng</h2>
       <form id="vocab-form" class="stack-form">
         <label>Từ<input name="word" required placeholder="resilient" /></label>
+        <label>Loại từ
+          <select name="wordType">
+            ${WORD_TYPE_OPTIONS.map((option) => `<option value="${option.value}">${option.label}</option>`).join('')}
+          </select>
+        </label>
         <label>Định nghĩa<input name="definition" required placeholder="Có khả năng phục hồi nhanh..." /></label>
         <label>Ví dụ<input name="example" placeholder="Một học sinh kiên cường luôn tiếp tục học hỏi." /></label>
         <button type="submit">Lưu vào cơ sở dữ liệu</button>
@@ -1967,6 +2055,7 @@ function renderSourceVocab() {
               <article class="manage-card">
                 <div>
                   <strong>${escapeHtml(item.word)}</strong>
+                  <span class="word-type-tag">${escapeHtml(WORD_TYPE_LABELS[item.wordType] || WORD_TYPE_LABELS.other)}</span>
                   <p>${escapeHtml(item.definition)}</p>
                 </div>
                 <div class="row-actions">
@@ -2272,6 +2361,7 @@ function attachExerciseEvents() {
             word: String(formData.get('word') || '').trim(),
             definition: String(formData.get('definition') || '').trim(),
             example: String(formData.get('example') || '').trim(),
+            wordType: String(formData.get('wordType') || 'other').trim(),
           })
           form.reset()
         },
@@ -2708,6 +2798,7 @@ function attachExerciseEvents() {
         word: item.word,
         definition: item.definition,
         example: item.example || '',
+        wordType: item.wordType || 'other',
       })
       return
     }

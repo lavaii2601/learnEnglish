@@ -109,7 +109,7 @@ npm run preview
 ### Cấu hình đã có sẵn
 
 - Frontend build từ Vite (`dist`)
-- API serverless tại `api/index.js`
+- API serverless tại `api/[...route].js`
 - Rewrite `/api/*` về cùng một API function
 
 ### Các bước deploy

@@ -326,10 +326,16 @@ function assertNoSupabaseError(error, fallbackMessage) {
   throw new Error(error.message || fallbackMessage)
 }
 
+const WORD_TYPES = ['noun', 'verb', 'adjective', 'other']
+
+function toWordType(value) {
+  return WORD_TYPES.includes(value) ? value : 'other'
+}
+
 async function fetchVocabularyRows() {
   const { data, error } = await supabase
     .from('vocabulary')
-    .select('id, word, definition, example')
+    .select('id, word, definition, example, word_type, mastered_count')
     .order('id', { ascending: false })
   assertNoSupabaseError(error, 'Không thể tải danh sách từ vựng')
   return data || []
@@ -575,7 +581,14 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
   )
 
   return {
-    vocabulary: vocabularyRows,
+    vocabulary: vocabularyRows.map((row) => ({
+      id: row.id,
+      word: row.word,
+      definition: row.definition,
+      example: row.example,
+      wordType: toWordType(row.word_type),
+      masteredCount: row.mastered_count || 0,
+    })),
     questions: {
       mcq: mcqRows.map((row) => ({
         id: row.id,
@@ -657,12 +670,13 @@ app.post('/api/vocabulary', async (req, res, next) => {
     const word = String(req.body.word || '').trim()
     const definition = String(req.body.definition || '').trim()
     const example = String(req.body.example || '').trim()
+    const wordType = toWordType(req.body.wordType)
 
     if (!word || !definition) {
       return res.status(400).json({ message: 'Cần có đầy đủ từ và định nghĩa' })
     }
 
-    const { error } = await supabase.from('vocabulary').insert([{ word, definition, example }])
+    const { error } = await supabase.from('vocabulary').insert([{ word, definition, example, word_type: wordType }])
     assertNoSupabaseError(error, 'Không thể thêm từ vựng')
     clearDatabaseResponseCache()
 
@@ -678,6 +692,7 @@ app.put('/api/vocabulary/:id', async (req, res, next) => {
     const word = String(req.body.word || '').trim()
     const definition = String(req.body.definition || '').trim()
     const example = String(req.body.example || '').trim()
+    const wordType = toWordType(req.body.wordType)
 
     if (!id || !word || !definition) {
       return res.status(400).json({ message: 'Dữ liệu gửi lên không hợp lệ' })
@@ -685,12 +700,41 @@ app.put('/api/vocabulary/:id', async (req, res, next) => {
 
     const { error } = await supabase
       .from('vocabulary')
-      .update({ word, definition, example })
+      .update({ word, definition, example, word_type: wordType })
       .eq('id', id)
     assertNoSupabaseError(error, 'Không thể cập nhật từ vựng')
     clearDatabaseResponseCache()
 
     return res.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/vocabulary/:id/progress', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id)
+    if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
+
+    const correct = Boolean(req.body.correct)
+
+    const { data, error: selectError } = await supabase
+      .from('vocabulary')
+      .select('mastered_count')
+      .eq('id', id)
+    assertNoSupabaseError(selectError, 'Không thể tải dữ liệu từ vựng')
+
+    const current = data?.[0]?.mastered_count || 0
+    const masteredCount = Math.max(0, current + (correct ? 1 : -1))
+
+    const { error } = await supabase
+      .from('vocabulary')
+      .update({ mastered_count: masteredCount })
+      .eq('id', id)
+    assertNoSupabaseError(error, 'Không thể cập nhật tiến độ từ vựng')
+    clearDatabaseResponseCache()
+
+    return res.json({ ok: true, masteredCount })
   } catch (error) {
     next(error)
   }

@@ -62,6 +62,13 @@ export function updateVocabulary(id, payload) {
   })
 }
 
+export function updateVocabularyProgress(id, correct) {
+  return request(`/api/vocabulary/${id}/progress`, {
+    method: 'POST',
+    body: JSON.stringify({ correct }),
+  })
+}
+
 export function deleteVocabulary(id) {
   return requestWithDeleteFallback(
     `/api/vocabulary/${id}`,
