@@ -1158,6 +1158,7 @@ function openResultNotice(type) {
 }
 
 const ROUTE_TITLE_MAP = {
+  '/welcome': 'Chào mừng',
   '/home': 'Trang chủ',
   '/exercise/mcq': 'Trắc nghiệm',
   '/exercise/matching': 'Nối từ',
@@ -1322,7 +1323,8 @@ function renderLandingPage() {
         <h1>Luyện tiếng Anh 5 cùng Hồng Nga</h1>
         <p class="landing-subtitle">Bắt đầu nhanh với bộ bài tập và trang quản lý dữ liệu học tập.</p>
         <div class="landing-actions">
-          <button type="button" class="action-btn" data-route="/exercise/mcq">Vào luyện tập</button>
+          <button type="button" class="action-btn" data-route="/home">Vào trang chủ</button>
+          <button type="button" class="small-btn" data-route="/exercise/mcq">Luyện tập ngay</button>
           <button type="button" class="small-btn" data-route="/source/vocab">Quản lý nguồn dữ liệu</button>
         </div>
       </section>
@@ -1356,6 +1358,14 @@ async function refreshDatabase(options = {}) {
 }
 
 async function loadDataForCurrentRoute() {
+  if (state.route === '/welcome') {
+    state.loading = false
+    state.serverError = ''
+    render()
+    void preloadDatabase()
+    return
+  }
+
   const hasFreshCache = Boolean(getCachedDatabaseEntry())
   state.loading = !hasFreshCache
   state.serverError = ''
@@ -1370,6 +1380,15 @@ async function loadDataForCurrentRoute() {
 
   state.loading = false
   render()
+}
+
+async function preloadDatabase() {
+  try {
+    const payload = await fetchDatabase()
+    saveDatabaseCache(payload)
+  } catch {
+    // The route loader will display an error if the user opens a data page.
+  }
 }
 
 async function withRefresh(action, successMessage) {
@@ -1519,11 +1538,11 @@ function renderArrangePage() {
               </div>
               <p class="muted">Hệ thống sẽ chuẩn hóa khoảng trắng và kiểm tra chính xác theo từng ký tự của câu bạn nhập.</p>
               <textarea data-arrange-index="${activeQuestionIndex}" rows="4" placeholder="Nhập câu đúng tại đây">${escapeHtml(typedAnswer)}</textarea>
-              <p class="muted">Bạn đã nhập: <strong>${escapeHtml(builtSentence || '(trống)')}</strong></p>
-              ${feedbackText ? `<p class="notice ${currentChecked ? 'ok' : 'error'}">${escapeHtml(feedbackText)}</p>` : ''}
+              <p class="muted">Bạn đã nhập: <strong data-arrange-preview>${escapeHtml(builtSentence || '(trống)')}</strong></p>
+              ${feedbackText ? `<p class="notice ${currentChecked ? 'ok' : 'error'}" data-arrange-feedback>${escapeHtml(feedbackText)}</p>` : ''}
               ${currentChecked
           ? `
-                    <div class="listing-review-block">
+                    <div class="listing-review-block" data-arrange-result>
                       <article class="listing-review-item ok">
                         <p><strong>Kết quả:</strong> Đúng hoàn toàn theo ký tự.</p>
                       </article>
@@ -1532,7 +1551,7 @@ function renderArrangePage() {
           : ''}
               ${currentShowAnswer
           ? `
-                    <div class="listing-review-block">
+                    <div class="listing-review-block" data-arrange-answer>
                       <article class="listing-review-item ok">
                         <p><strong>Đáp án đúng:</strong> ${escapeHtml(expectedSentence || '(trống)')}</p>
                       </article>
@@ -1541,7 +1560,7 @@ function renderArrangePage() {
           : ''}
             </article>
             <div class="mcq-complete-actions">
-              <button type="button" class="action-btn" ${currentChecked ? 'data-arrange-next-question' : 'data-arrange-check-current'}>${currentChecked ? (!sessionComplete ? 'Qua câu tiếp theo' : 'Hoàn tất') : 'Kiểm tra câu hiện tại'}</button>
+              <button type="button" class="action-btn" data-arrange-primary-action ${currentChecked ? 'data-arrange-next-question' : 'data-arrange-check-current'}>${currentChecked ? (!sessionComplete ? 'Qua câu tiếp theo' : 'Hoàn tất') : 'Kiểm tra câu hiện tại'}</button>
               ${!sessionComplete ? '<button type="button" class="small-btn" data-arrange-skip-question>Câu mới</button>' : ''}
               <button type="button" class="small-btn" data-arrange-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án'}</button>
               <button type="button" class="small-btn" data-arrange-clear-current ${typedAnswer.trim() ? '' : 'disabled'}>Xóa câu đã nhập</button>
@@ -2172,6 +2191,7 @@ function renderSourceMessage() {
 }
 
 function renderCurrentPage() {
+  if (state.route === '/welcome') return renderLandingPage()
   if (state.route === '/home') return renderLayout(renderHome())
   if (state.route === '/exercise/mcq') return renderLayout(renderMcqPage())
   if (state.route === '/exercise/matching') return renderLayout(renderMatchingPage())
@@ -2274,7 +2294,27 @@ function attachExerciseEvents() {
       state.arrangeCheckedMap[index] = false
       state.arrangeShowAnswerMap[index] = false
       state.arrangeFeedbackMap[index] = ''
-      scheduleRender()
+
+      const preview = app.querySelector('[data-arrange-preview]')
+      if (preview) {
+        preview.textContent = normalizeArrangeSentence(target.value) || '(trống)'
+      }
+
+      const clearButton = app.querySelector('[data-arrange-clear-current]')
+      if (clearButton) {
+        clearButton.disabled = !target.value.trim()
+      }
+
+      app.querySelector('[data-arrange-feedback]')?.remove()
+      app.querySelector('[data-arrange-result]')?.remove()
+      app.querySelector('[data-arrange-answer]')?.remove()
+
+      const primaryButton = app.querySelector('[data-arrange-primary-action]')
+      if (primaryButton) {
+        primaryButton.removeAttribute('data-arrange-next-question')
+        primaryButton.setAttribute('data-arrange-check-current', '')
+        primaryButton.textContent = 'Kiểm tra câu hiện tại'
+      }
     }
   })
 
@@ -3110,7 +3150,7 @@ window.addEventListener('hashchange', async () => {
 
 async function bootstrap() {
   if (!window.location.hash) {
-    setRoute('/home')
+    setRoute('/welcome')
     await loadDataForCurrentRoute()
     return
   }
