@@ -110,7 +110,8 @@ npm run preview
 
 - Frontend build từ Vite (`dist`)
 - API serverless tại `api/[...route].js`
-- Rewrite `/api/*` về cùng một API function
+- Vercel tự động định tuyến `/api/*` tới API catch-all
+- Node.js 24 được khai báo trong `package.json`
 
 ### Các bước deploy
 

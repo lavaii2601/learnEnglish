@@ -56,11 +56,40 @@ function createMockSupabase() {
   function deepCopy(v) { return JSON.parse(JSON.stringify(v)) }
   function from(table) {
     if (!Object.prototype.hasOwnProperty.call(tables, table)) tables[table] = []
+
+    function select(cols, opts) {
+      const filters = []
+      const query = {
+        eq(field, value) {
+          filters.push([field, value])
+          return query
+        },
+        order(field, { ascending = true } = {}) {
+          const rows = tables[table]
+            .filter((row) => filters.every(([filterField, filterValue]) => (
+              String(row[filterField]) === String(filterValue)
+            )))
+            .sort((left, right) => {
+              const comparison = Number(left[field]) - Number(right[field])
+              return ascending ? comparison : -comparison
+            })
+          return Promise.resolve({ data: deepCopy(rows), error: null })
+        },
+        then(resolve, reject) {
+          const rows = tables[table].filter((row) => filters.every(([filterField, filterValue]) => (
+            String(row[filterField]) === String(filterValue)
+          )))
+          const result = opts?.head
+            ? { count: rows.length, error: null }
+            : { data: deepCopy(rows), error: null }
+          return Promise.resolve(result).then(resolve, reject)
+        },
+      }
+      return query
+    }
+
     return {
-      select: async (cols, opts) => {
-        if (opts && opts.head) return { count: tables[table].length, error: null }
-        return { data: deepCopy(tables[table]).reverse(), error: null }
-      },
+      select,
       insert: async (rows) => {
         const arr = Array.isArray(rows) ? rows : [rows]
         arr.forEach((row) => {

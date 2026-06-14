@@ -3,7 +3,9 @@ Vercel deploy checklist
 1. Build & Output
 - Build Command: `npm run build`
 - Output Directory: `dist`
-- Rewrites: `/api/(.*)` -> `/api/[...route].js` (already in `vercel.json`)
+- Framework Preset: `Other` (already set in `vercel.json`)
+- Node.js: `24.x` (already set in `package.json`)
+- API routes are served automatically from `api/[...route].js`
 
 2. Environment Variables (Project Settings)
 - `SUPABASE_URL` (required)
