@@ -1191,10 +1191,12 @@ function renderLayout(content) {
 
   const quickBoardMarkup = `
     <header class="slide-board-head">
-      <strong>Bảng nhanh</strong>
+      <div>
+        <strong>Thông tin nguồn dữ liệu</strong>
+        <p class="muted">Số lượng dữ liệu hiện có trong Supabase.</p>
+      </div>
       <button type="button" class="slide-board-close" data-toggle-slide-board="true">Đóng</button>
     </header>
-    <p class="muted">Theo dõi dữ liệu chính mà không cần rời menu.</p>
     <div class="slide-stat-grid">
       <article><span>Bản ghi từ vựng</span><strong>${vocabularyCount}</strong></article>
       <article><span>Từ vựng duy nhất</span><strong>${uniqueVocabularyCount}</strong></article>
@@ -1246,21 +1248,23 @@ function renderLayout(content) {
           <button class="slide-trigger ${state.slideBoardOpen ? 'active' : ''}" data-toggle-slide-board="true" type="button" aria-expanded="${state.slideBoardOpen ? 'true' : 'false'}"><span class="nav-icon">▦</span>${state.slideBoardOpen ? 'Đóng bảng nhanh' : 'Mở bảng nhanh'}</button>
         </section>
 
-        <section class="slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
-          ${quickBoardMarkup}
-        </section>
       </aside>
 
-      <button
-        type="button"
-        class="mobile-slide-board-backdrop ${state.slideBoardOpen ? 'open' : ''}"
-        data-toggle-slide-board="true"
-        aria-label="Đóng bảng nhanh"
-      ></button>
-
-      <section class="mobile-slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
-        ${quickBoardMarkup}
-      </section>
+      ${state.slideBoardOpen
+        ? `
+          <div class="quick-board-overlay" data-toggle-slide-board="true">
+            <section
+              class="quick-board-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Thông tin nguồn dữ liệu"
+              data-quick-board-dialog
+            >
+              ${quickBoardMarkup}
+            </section>
+          </div>
+        `
+        : ''}
 
       <button
         type="button"
@@ -2529,6 +2533,12 @@ function attachExerciseEvents() {
     const target = event.target
     const button = target.closest('button')
 
+    if (target.matches('.quick-board-overlay')) {
+      state.slideBoardOpen = false
+      render()
+      return
+    }
+
     if (button?.matches('[data-route]')) {
       const route = button.dataset.route
       if (!route) return
@@ -2560,15 +2570,6 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-toggle-slide-board]')) {
-      const isMobile = window.innerWidth <= 980
-      if (isMobile && !state.slideBoardOpen) {
-        state.slideBoardOpen = true
-        state.sidebarOpen = false
-        window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(state.sidebarOpen))
-        render()
-        return
-      }
-
       state.slideBoardOpen = !state.slideBoardOpen
       render()
       return
@@ -3270,6 +3271,12 @@ window.addEventListener('hashchange', async () => {
   state.sourceMessage = ''
   state.resultNotice = null
   await loadDataForCurrentRoute()
+})
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !state.slideBoardOpen) return
+  state.slideBoardOpen = false
+  render()
 })
 
 async function bootstrap() {
