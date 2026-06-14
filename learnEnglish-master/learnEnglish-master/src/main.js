@@ -1171,10 +1171,11 @@ const ROUTE_TITLE_MAP = {
 }
 
 function renderLayout(content) {
-  const sourceGroupOpen = state.sourceGroupOpen || isSourceRoute(state.route)
-
   const questionAnswerCount = state.database.questions.mcq.length
   const vocabularyCount = state.database.vocabulary.length
+  const masteredCount = state.database.vocabulary.filter(
+    (item) => (item.masteredCount || 0) >= MASTERED_THRESHOLD,
+  ).length
   const mcqTotalCount = vocabularyCount + questionAnswerCount
   const totalQuestions =
     questionAnswerCount +
@@ -1206,43 +1207,26 @@ function renderLayout(content) {
     <main class="shell app-shell ${state.sidebarOpen ? '' : 'menu-hidden'}">
       <aside class="sidebar">
         <section class="sidebar-head">
-          <img
-            class="brand-logo sidebar-logo"
-            src="/logo.jpg"
-            alt="Logo Học tiếng Anh cùng Hồng Nga"
-            onerror="this.style.display='none'"
-          />
           <h1>Học tiếng Anh cùng Hồng Nga</h1>
           <p class="muted">Luyện tập và quản lý dữ liệu học tiếng Anh.</p>
         </section>
 
         <section class="sidebar-scroll" data-sidebar-scroll>
           <p class="group-title">Điều hướng</p>
-          <button class="nav-btn ${state.route === '/home' ? 'active' : ''}" data-route="/home">Trang chủ</button>
+          <button class="nav-btn ${state.route === '/home' ? 'active' : ''}" data-route="/home"><span class="nav-icon">⌂</span>Trang chủ</button>
 
           <p class="group-title">Bài tập</p>
-          <button class="nav-btn ${state.route === '/exercise/mcq' ? 'active' : ''}" data-route="/exercise/mcq">Trắc nghiệm</button>
-          <button class="nav-btn ${state.route === '/exercise/matching' ? 'active' : ''}" data-route="/exercise/matching">Nối từ</button>
-          <button class="nav-btn ${state.route === '/exercise/fill' ? 'active' : ''}" data-route="/exercise/fill">Điền chỗ trống</button>
-          <button class="nav-btn ${state.route === '/exercise/writing' ? 'active' : ''}" data-route="/exercise/writing">Viết</button>
-          <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing">Liệt kê</button>
-          <button class="nav-btn ${state.route === '/exercise/arrange' ? 'active' : ''}" data-route="/exercise/arrange">Sắp xếp câu</button>
+          <button class="nav-btn ${state.route === '/exercise/mcq' ? 'active' : ''}" data-route="/exercise/mcq"><span class="nav-icon">☑</span>Trắc nghiệm</button>
+          <button class="nav-btn ${state.route === '/exercise/matching' ? 'active' : ''}" data-route="/exercise/matching"><span class="nav-icon">↔</span>Nối từ</button>
+          <button class="nav-btn ${state.route === '/exercise/fill' ? 'active' : ''}" data-route="/exercise/fill"><span class="nav-icon">▣</span>Điền chỗ trống</button>
+          <button class="nav-btn ${state.route === '/exercise/writing' ? 'active' : ''}" data-route="/exercise/writing"><span class="nav-icon">／</span>Viết</button>
+          <button class="nav-btn ${state.route === '/exercise/listing' ? 'active' : ''}" data-route="/exercise/listing"><span class="nav-icon">☷</span>Liệt kê</button>
+          <button class="nav-btn ${state.route === '/exercise/arrange' ? 'active' : ''}" data-route="/exercise/arrange"><span class="nav-icon">☰</span>Sắp xếp câu</button>
 
           <p class="group-title">Nguồn dữ liệu</p>
-          <button
-            class="nav-btn nav-group-toggle ${sourceGroupOpen ? 'active' : ''}"
-            type="button"
-            data-toggle-source-group="true"
-            aria-expanded="${sourceGroupOpen ? 'true' : 'false'}"
-          >
-            <span>Thêm nguồn</span>
-            <span class="nav-caret">${sourceGroupOpen ? '▾' : '▸'}</span>
-          </button>
-          <div class="nav-subgroup ${sourceGroupOpen ? 'open' : ''}">
-            <button class="nav-btn nav-sub-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab">Nhiệm vụ: Thêm từ vựng</button>
-            <button class="nav-btn nav-sub-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions">Nhiệm vụ: Thêm câu hỏi + trả lời</button>
-            <button class="nav-btn nav-sub-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching">Nhiệm vụ: Thêm từ nối</button>
-          </div>
+          <button class="nav-btn ${state.route === '/source/vocab' ? 'active' : ''}" data-route="/source/vocab"><span class="nav-icon">＋</span>Thêm từ vựng</button>
+          <button class="nav-btn ${state.route === '/source/questions' ? 'active' : ''}" data-route="/source/questions"><span class="nav-icon">▦</span>Thêm câu hỏi</button>
+          <button class="nav-btn ${state.route === '/source/matching' ? 'active' : ''}" data-route="/source/matching"><span class="nav-icon">⊞</span>Thêm từ nối</button>
         </section>
 
         <section class="sidebar-tools">
@@ -1251,14 +1235,7 @@ function renderLayout(content) {
             <button type="button" class="small-btn menu-scroll-btn" data-menu-scroll="down">Xuống</button>
           </div>
 
-          <button
-            class="slide-trigger ${state.slideBoardOpen ? 'active' : ''}"
-            data-toggle-slide-board="true"
-            type="button"
-            aria-expanded="${state.slideBoardOpen ? 'true' : 'false'}"
-          >
-            ${state.slideBoardOpen ? 'Thu gọn bảng nhanh' : 'Mở bảng nhanh'}
-          </button>
+          <button class="slide-trigger ${state.slideBoardOpen ? 'active' : ''}" data-toggle-slide-board="true" type="button" aria-expanded="${state.slideBoardOpen ? 'true' : 'false'}"><span class="nav-icon">▦</span>${state.slideBoardOpen ? 'Đóng bảng nhanh' : 'Mở bảng nhanh'}</button>
         </section>
 
         <section class="slide-board ${state.slideBoardOpen ? 'open' : ''}" aria-hidden="${state.slideBoardOpen ? 'false' : 'true'}">
@@ -1300,7 +1277,7 @@ function renderLayout(content) {
             </button>
             <p class="route-pill">${ROUTE_TITLE_MAP[state.route] || 'Học tiếng Anh cùng Hồng Nga'}</p>
           </div>
-          <p class="muted">Dữ liệu đang truy xuất từ backend SQLite.</p>
+          <p class="header-stats">Kho từ vựng: <strong>${vocabularyCount} từ</strong> · Đã thuộc: <strong>${masteredCount} từ</strong></p>
         </header>
         ${content}
       </section>
@@ -1379,13 +1356,6 @@ async function refreshDatabase(options = {}) {
 }
 
 async function loadDataForCurrentRoute() {
-  if (state.route === '/home') {
-    state.loading = false
-    state.serverError = ''
-    render()
-    return
-  }
-
   const hasFreshCache = Boolean(getCachedDatabaseEntry())
   state.loading = !hasFreshCache
   state.serverError = ''
@@ -1400,15 +1370,6 @@ async function loadDataForCurrentRoute() {
 
   state.loading = false
   render()
-}
-
-async function preloadDatabase() {
-  try {
-    const payload = await fetchDatabase()
-    saveDatabaseCache(payload)
-  } catch {
-    // The normal route loader will show an actionable error if preloading fails.
-  }
 }
 
 async function withRefresh(action, successMessage) {
@@ -1434,8 +1395,6 @@ function renderHome() {
   const writingCount = state.database.questions.writing.length
   const listingCount = (state.database.questions.listing || []).length
   const arrangeCount = (state.database.questions.arrange || []).length
-  const totalQuestions = mcqCount + matchingCount + blankCount + writingCount + listingCount + arrangeCount
-
   const masteredCount = state.database.vocabulary.filter((item) => (item.masteredCount || 0) >= MASTERED_THRESHOLD).length
   const needsReviewCount = vocabCount - masteredCount
 
@@ -1506,16 +1465,6 @@ function renderHome() {
       </div>
       `
       : ''}
-
-      <div class="stat-grid">
-        <article><strong>${vocabCount}</strong><span>Từ vựng</span></article>
-        <article><strong>${mcqCount}</strong><span>Câu trắc nghiệm</span></article>
-        <article><strong>${matchingCount}</strong><span>Cặp nối từ</span></article>
-        <article><strong>${blankCount}</strong><span>Câu điền trống</span></article>
-        <article><strong>${writingCount}</strong><span>Đề viết</span></article>
-        <article><strong>${listingCount}</strong><span>Câu hỏi liệt kê</span></article>
-        <article><strong>${arrangeCount}</strong><span>Câu hỏi sắp xếp</span></article>
-      </div>
     </section>
   `
 }
@@ -2223,7 +2172,7 @@ function renderSourceMessage() {
 }
 
 function renderCurrentPage() {
-  if (state.route === '/home') return renderLandingPage()
+  if (state.route === '/home') return renderLayout(renderHome())
   if (state.route === '/exercise/mcq') return renderLayout(renderMcqPage())
   if (state.route === '/exercise/matching') return renderLayout(renderMatchingPage())
   if (state.route === '/exercise/fill') return renderLayout(renderFillPage())
@@ -3162,16 +3111,7 @@ window.addEventListener('hashchange', async () => {
 async function bootstrap() {
   if (!window.location.hash) {
     setRoute('/home')
-    state.loading = false
-    render()
-    void preloadDatabase()
-    return
-  }
-
-  if (state.route === '/home') {
-    state.loading = false
-    render()
-    void preloadDatabase()
+    await loadDataForCurrentRoute()
     return
   }
 
