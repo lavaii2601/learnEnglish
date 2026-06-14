@@ -376,6 +376,15 @@ body {
   color: var(--brand-deep);
 }
 
+.slide-stat-grid article.warning {
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+
+.slide-stat-grid article.warning strong {
+  color: #c2410c;
+}
+
 .nav-btn:focus-visible,
 .slide-trigger:focus-visible,
 .slide-board-close:focus-visible,
@@ -612,7 +621,8 @@ p {
 }
 
 .word-type-grid {
-  overflow: hidden;
+  overflow: visible;
+  z-index: 10;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fff;
@@ -1428,7 +1438,7 @@ textarea:focus-visible {
     pointer-events: auto;
   }
 
-  .slide-board {
+.slide-board {
     display: none;
   }
 
@@ -1438,8 +1448,9 @@ textarea:focus-visible {
     border: 0;
     background: rgba(14, 25, 40, 0.34);
     z-index: 40;
-    opacity: 0;
-    pointer-events: none;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 25;
     transition: opacity var(--motion-fast) ease;
     display: block;
   }

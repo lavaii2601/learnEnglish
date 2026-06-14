@@ -14,7 +14,7 @@ const app = document.querySelector('#app')
 const SIDEBAR_OPEN_STORAGE_KEY = 'english_lab_sidebar_open'
 const DATABASE_CACHE_TTL_MS = 30_000
 const PERSISTENT_DATABASE_CACHE_TTL_MS = 10 * 60_000
-const DATABASE_CACHE_STORAGE_KEY = 'english_lab_database_cache_v1'
+const DATABASE_CACHE_STORAGE_KEY = 'english_lab_database_cache_v2'
 const WORD_TYPE_OPTIONS = [
   { value: 'noun', label: 'Danh từ' },
   { value: 'verb', label: 'Động từ' },
@@ -1174,15 +1174,24 @@ const ROUTE_TITLE_MAP = {
 function renderLayout(content) {
   const questionAnswerCount = state.database.questions.mcq.length
   const vocabularyCount = state.database.vocabulary.length
+  const uniqueVocabularyCount = new Set(
+    state.database.vocabulary
+      .map((item) => normalizeText(String(item.word || '')))
+      .filter(Boolean),
+  ).size
+  const duplicateVocabularyCount = vocabularyCount - uniqueVocabularyCount
   const masteredCount = state.database.vocabulary.filter(
     (item) => (item.masteredCount || 0) >= MASTERED_THRESHOLD,
   ).length
   const mcqTotalCount = vocabularyCount + questionAnswerCount
+  const matchingCount = state.database.questions.matching.length
+  const fillBlankCount = state.database.questions.fillBlank.length
+  const writingCount = state.database.questions.writing.length
   const totalQuestions =
     questionAnswerCount +
-    state.database.questions.matching.length +
-    state.database.questions.fillBlank.length +
-    state.database.questions.writing.length +
+    matchingCount +
+    fillBlankCount +
+    writingCount +
     (state.database.questions.listing || []).length +
     (state.database.questions.arrange || []).length
   const listingCount = (state.database.questions.listing || []).length
@@ -1195,12 +1204,18 @@ function renderLayout(content) {
     </header>
     <p class="muted">Theo dõi dữ liệu chính mà không cần rời menu.</p>
     <div class="slide-stat-grid">
+      <article><span>Bản ghi từ vựng</span><strong>${vocabularyCount}</strong></article>
+      <article><span>Từ vựng duy nhất</span><strong>${uniqueVocabularyCount}</strong></article>
+      ${duplicateVocabularyCount > 0 ? `<article class="warning"><span>Bản ghi trùng từ</span><strong>${duplicateVocabularyCount}</strong></article>` : ''}
       <article><span>Tổng câu hỏi</span><strong>${totalQuestions}</strong></article>
-      <article><span>Từ vựng</span><strong>${vocabularyCount}</strong></article>
-      <article><span>Câu hỏi/câu trả lời</span><strong>${questionAnswerCount}</strong></article>
-      <article><span>Trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
-      <article><span>Câu hỏi liệt kê</span><strong>${listingCount}</strong></article>
-      <article><span>Câu hỏi sắp xếp</span><strong>${arrangeCount}</strong></article>
+      <article><span>Trắc nghiệm đã nhập</span><strong>${questionAnswerCount}</strong></article>
+      <article><span>Trắc nghiệm từ kho từ</span><strong>${vocabularyCount}</strong></article>
+      <article><span>Tổng nguồn trắc nghiệm</span><strong>${mcqTotalCount}</strong></article>
+      <article><span>Nối từ</span><strong>${matchingCount}</strong></article>
+      <article><span>Điền chỗ trống</span><strong>${fillBlankCount}</strong></article>
+      <article><span>Viết</span><strong>${writingCount}</strong></article>
+      <article><span>Liệt kê</span><strong>${listingCount}</strong></article>
+      <article><span>Sắp xếp câu</span><strong>${arrangeCount}</strong></article>
     </div>
   `
 
@@ -1366,16 +1381,23 @@ async function loadDataForCurrentRoute() {
     return
   }
 
-  const hasFreshCache = Boolean(getCachedDatabaseEntry())
+  const cached = getCachedDatabaseEntry()
+  const hasFreshCache = Boolean(cached)
+  if (cached) {
+    state.database = cloneDatabasePayload(cached.data)
+  }
+
   state.loading = !hasFreshCache
   state.serverError = ''
-  if (state.loading) render()
+  render()
 
   try {
-    await refreshDatabase()
+    await refreshDatabase({ force: true })
     resetExerciseState()
   } catch (error) {
-    state.serverError = error.message || 'Không truy vấn được dữ liệu từ cơ sở dữ liệu.'
+    if (!hasFreshCache) {
+      state.serverError = error.message || 'Không truy vấn được dữ liệu từ cơ sở dữ liệu.'
+    }
   }
 
   state.loading = false
@@ -1384,7 +1406,7 @@ async function loadDataForCurrentRoute() {
 
 async function preloadDatabase() {
   try {
-    const payload = await fetchDatabase()
+    const payload = await fetchDatabase({ fresh: true })
     saveDatabaseCache(payload)
   } catch {
     // The route loader will display an error if the user opens a data page.
