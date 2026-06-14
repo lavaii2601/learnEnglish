@@ -54,6 +54,9 @@ const state = {
   matchingChecked: false,
   matchingSessionPhase: 'setup',
   blankAnswers: [],
+  fillCurrentIndex: 0,
+  fillCheckedMap: [],
+  fillFeedbackMap: [],
   writingAnswers: [],
   listingAnswers: [],
   listingQuestionCount: 5,
@@ -98,6 +101,8 @@ const state = {
   arrangeShowAnswerMap: [],
   arrangeTypedAnswers: [],
   arrangeFeedbackMap: [],
+  arrangeWordBanks: [],
+  arrangeSelectedTokenIndexes: [],
 }
 
 let renderScheduled = false
@@ -255,6 +260,10 @@ function resetArrangeSession(totalQuestions) {
   state.arrangeShowAnswerMap = Array(total).fill(false)
   state.arrangeFeedbackMap = Array(total).fill('')
   state.arrangeTypedAnswers = Array(total).fill('')
+  state.arrangeWordBanks = Array.from({ length: total }, (_, index) => (
+    getShuffledArrangeWords(state.database.questions.arrange?.[index]?.answer)
+  ))
+  state.arrangeSelectedTokenIndexes = Array.from({ length: total }, () => [])
 }
 
 function scoreArrange() {
@@ -590,8 +599,12 @@ function resetExerciseState() {
   state.mcqReviewOpen = false
   state.mcqSessionPhase = 'setup'
   state.mcqWrongQuestions = []
-  clearMatchingSession()
+  resetMatchingSession(matching.length)
+  state.matchingSessionPhase = state.matchingSessionIds.length ? 'playing' : 'setup'
   state.blankAnswers = Array(fillBlank.length).fill('')
+  state.fillCurrentIndex = 0
+  state.fillCheckedMap = Array(fillBlank.length).fill(false)
+  state.fillFeedbackMap = Array(fillBlank.length).fill('')
   state.writingAnswers = Array(writing.length).fill('')
   state.listingAnswers = Array(listing.length).fill('')
   resetListingSession(listing.length)
@@ -1517,81 +1530,111 @@ function renderArrangePage() {
   const currentIndex = Math.max(0, Math.min(state.arrangeCurrentIndex, Math.max(totalCount - 1, 0)))
   const activeQuestionIndex = sessionIndexes[currentIndex] ?? 0
   const currentItem = items[activeQuestionIndex]
-  const typedAnswer = state.arrangeTypedAnswers[activeQuestionIndex] || ''
+  const wordBank = state.arrangeWordBanks[activeQuestionIndex] || []
+  const selectedTokenIndexes = state.arrangeSelectedTokenIndexes[activeQuestionIndex] || []
+  const typedAnswer = selectedTokenIndexes.map((index) => wordBank[index]).join(' ')
   const builtSentence = normalizeArrangeSentence(typedAnswer)
   const expectedSentence = normalizeArrangeSentence(currentItem?.answer)
-  const shuffledWords = getShuffledArrangeWords(currentItem?.answer)
-  const isExactMatch = builtSentence === expectedSentence
   const currentChecked = Boolean(state.arrangeCheckedMap[activeQuestionIndex])
-  const currentShowAnswer = Boolean(state.arrangeShowAnswerMap[activeQuestionIndex])
   const feedbackText = String(state.arrangeFeedbackMap[activeQuestionIndex] || '').trim()
-  const checkedCount = sessionIndexes.filter((index) => state.arrangeCheckedMap[index]).length
-  const maxSelectable = Math.min(5, Math.max(1, items.length || 1))
-  const currentSelectable = Math.min(maxSelectable, Math.max(1, state.arrangeQuestionCount || 1))
-  const sessionComplete = totalCount > 0 && checkedCount === totalCount
+  const allTokensSelected = wordBank.length > 0 && selectedTokenIndexes.length === wordBank.length
 
   return `
-    <section class="page-card">
-      <h2>Sắp xếp câu</h2>
-      <article class="question-card compact">
-        <label>
-          Số lượng câu sắp xếp (1-5)
-          <select data-arrange-question-count>
-            ${Array.from({ length: maxSelectable }, (_, index) => index + 1)
-      .map((value) => `<option value="${value}" ${currentSelectable === value ? 'selected' : ''}>${value} câu</option>`)
-      .join('')}
-          </select>
-        </label>
-        <button type="button" class="small-btn" data-arrange-reset-session>Random bộ câu mới</button>
-      </article>
+    <section class="page-card focused-exercise">
+      <header class="exercise-page-heading">
+        <h2>Sắp xếp câu</h2>
+        <span>Câu ${totalCount ? currentIndex + 1 : 0}/${totalCount}</span>
+      </header>
       ${currentItem
       ? `
-            <article class="question-card">
-              <h3 class="question-title">
-                <span class="question-order">Câu ngẫu nhiên (${checkedCount}/${totalCount} đã đúng)</span>
-                <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
-              </h3>
-              <p class="question-hint">${escapeHtml(currentItem.hint || 'Nhập lại câu đúng vào ô bên dưới.')}</p>
-              <p class="muted">Sắp xếp lại các từ sau để tạo thành câu đúng:</p>
-              <div class="word-chip-row">
-                ${shuffledWords.length
-          ? shuffledWords.map((word) => `<span class="word-chip">${escapeHtml(word)}</span>`).join('')
-          : '<span class="muted">(Chưa có từ để trộn)</span>'}
-              </div>
-              <p class="muted">Hệ thống sẽ chuẩn hóa khoảng trắng và kiểm tra chính xác theo từng ký tự của câu bạn nhập.</p>
-              <textarea data-arrange-index="${activeQuestionIndex}" rows="4" placeholder="Nhập câu đúng tại đây">${escapeHtml(typedAnswer)}</textarea>
-              <p class="muted">Bạn đã nhập: <strong data-arrange-preview>${escapeHtml(builtSentence || '(trống)')}</strong></p>
-              ${feedbackText ? `<p class="notice ${currentChecked ? 'ok' : 'error'}" data-arrange-feedback>${escapeHtml(feedbackText)}</p>` : ''}
-              ${currentChecked
-          ? `
-                    <div class="listing-review-block" data-arrange-result>
-                      <article class="listing-review-item ok">
-                        <p><strong>Kết quả:</strong> Đúng hoàn toàn theo ký tự.</p>
-                      </article>
-                    </div>
-                  `
-          : ''}
-              ${currentShowAnswer
-          ? `
-                    <div class="listing-review-block" data-arrange-answer>
-                      <article class="listing-review-item ok">
-                        <p><strong>Đáp án đúng:</strong> ${escapeHtml(expectedSentence || '(trống)')}</p>
-                      </article>
-                    </div>
-                  `
-          : ''}
+            <article class="exercise-prompt-card">
+              <span class="exercise-eyebrow">Nghĩa tiếng Việt</span>
+              <strong>${escapeHtml(currentItem.prompt)}</strong>
+              ${currentItem.hint ? `<p>${escapeHtml(currentItem.hint)}</p>` : ''}
             </article>
-            <div class="mcq-complete-actions">
-              <button type="button" class="action-btn" data-arrange-primary-action ${currentChecked ? 'data-arrange-next-question' : 'data-arrange-check-current'}>${currentChecked ? (!sessionComplete ? 'Qua câu tiếp theo' : 'Hoàn tất') : 'Kiểm tra câu hiện tại'}</button>
-              ${!sessionComplete ? '<button type="button" class="small-btn" data-arrange-skip-question>Câu mới</button>' : ''}
-              <button type="button" class="small-btn" data-arrange-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án'}</button>
-              <button type="button" class="small-btn" data-arrange-clear-current ${typedAnswer.trim() ? '' : 'disabled'}>Xóa câu đã nhập</button>
+
+            <div class="arrange-drop-zone ${selectedTokenIndexes.length ? 'has-tokens' : ''}">
+              ${selectedTokenIndexes.length
+          ? selectedTokenIndexes.map((tokenIndex) => `
+                  <button type="button" class="arrange-token selected" data-arrange-remove-token="${tokenIndex}">
+                    ${escapeHtml(wordBank[tokenIndex])}
+                  </button>
+                `).join('')
+          : '<span>Nhấn từ bên dưới để thêm vào đây...</span>'}
             </div>
+
+            <div class="arrange-token-bank">
+              ${wordBank.map((word, tokenIndex) => `
+                <button
+                  type="button"
+                  class="arrange-token"
+                  data-arrange-add-token="${tokenIndex}"
+                  ${selectedTokenIndexes.includes(tokenIndex) ? 'disabled' : ''}
+                >${escapeHtml(word)}</button>
+              `).join('')}
+            </div>
+
+            ${feedbackText ? `<p class="notice ${currentChecked ? 'ok' : 'error'}">${escapeHtml(feedbackText)}</p>` : ''}
+
+            <div class="exercise-submit-row">
+              <button type="button" class="exercise-reset-btn" data-arrange-clear-current aria-label="Làm lại">↶</button>
+              <button
+                type="button"
+                class="action-btn exercise-check-btn"
+                data-arrange-check-current
+                ${allTokensSelected ? '' : 'disabled'}
+              >Kiểm tra</button>
+            </div>
+
+            ${currentChecked
+          ? `
+                <button type="button" class="small-btn exercise-next-btn" data-arrange-next-question>
+                  ${currentIndex + 1 < totalCount ? 'Câu tiếp theo' : 'Làm bộ câu mới'}
+                </button>
+              `
+          : ''}
           `
       : '<p class="muted">Chưa có câu hỏi sắp xếp nào.</p>'}
-      <p class="score-line">Đúng hoàn toàn: <strong>${scoreArrange()}/${totalCount}</strong> câu</p>
-      ${sessionComplete ? '<button type="button" class="action-btn" data-check-result="arrange">Kiểm tra kết quả</button>' : ''}
-      ${!currentChecked && builtSentence && !isExactMatch ? '<p class="muted">Cần sắp xếp lại và nhập đúng hoàn toàn trước khi qua câu tiếp theo.</p>' : ''}
+    </section>
+  `
+}
+
+function renderFillPage() {
+  const items = state.database.questions.fillBlank || []
+  const currentIndex = Math.max(0, Math.min(state.fillCurrentIndex, Math.max(items.length - 1, 0)))
+  const item = items[currentIndex]
+  const answer = state.blankAnswers[currentIndex] || ''
+  const checked = Boolean(state.fillCheckedMap[currentIndex])
+  const feedback = state.fillFeedbackMap[currentIndex] || ''
+
+  return `
+    <section class="page-card focused-exercise">
+      <header class="exercise-page-heading">
+        <h2>Điền chỗ trống</h2>
+        <span>${items.length ? currentIndex + 1 : 0}/${items.length}</span>
+      </header>
+      ${item
+      ? `
+          <article class="exercise-prompt-card fill-prompt-card">
+            <span class="exercise-eyebrow">Nghĩa của từ cần điền</span>
+            <strong>${escapeHtml(item.hint || 'Điền từ thích hợp vào chỗ trống')}</strong>
+            <p class="fill-sentence">${escapeHtml(item.sentence).replace('___', '<span class="blank-mark">________</span>')}</p>
+          </article>
+          <input
+            class="exercise-answer-input"
+            data-blank-index="${currentIndex}"
+            type="text"
+            value="${escapeHtml(answer)}"
+            placeholder="Nhập từ tiếng Anh..."
+            autocomplete="off"
+          />
+          ${feedback ? `<p class="notice ${checked ? 'ok' : 'error'}" data-fill-feedback>${escapeHtml(feedback)}</p>` : ''}
+          <button type="button" class="action-btn exercise-check-btn" data-fill-check ${answer.trim() ? '' : 'disabled'}>Kiểm tra</button>
+          ${checked
+          ? `<button type="button" class="small-btn exercise-next-btn" data-fill-next data-fill-next-button>${currentIndex + 1 < items.length ? 'Câu tiếp theo' : 'Làm lại từ đầu'}</button>`
+          : ''}
+        `
+      : '<p class="muted">Chưa có câu hỏi điền chỗ trống nào.</p>'}
     </section>
   `
 }
@@ -1753,43 +1796,27 @@ function renderMcqPage() {
 function renderMatchingPage() {
   const items = state.database.questions.matching
   const { leftColumn, rightColumn } = getMatchingSessionItems()
-  const score = scoreMatching()
-  const maxSelectable = Math.min(10, Math.max(1, items.length || 1))
-  const selectedCount = Math.min(maxSelectable, Math.max(1, state.matchingQuestionCount || 1))
-  const isComplete = isMatchingRoundComplete()
-  const inPlay = state.matchingSessionPhase === 'playing'
   const selectedLeftId = Number(state.matchingSelectedLeftId)
   const rightOwnershipMap = Object.entries(state.matchingPairs).reduce((map, [leftId, rightId]) => {
     map[String(rightId)] = Number(leftId)
     return map
   }, {})
+  const connectedCount = Object.keys(state.matchingPairs).length
+  const isComplete = isMatchingRoundComplete()
 
   return `
-    <section class="page-card">
-      <h2>Nối từ</h2>
-      <article class="question-card compact">
-        <label>
-          Số lượng cặp từ muốn nối
-          <select data-matching-question-count>
-            ${Array.from({ length: maxSelectable }, (_, index) => index + 1)
-      .map((value) => `<option value="${value}" ${selectedCount === value ? 'selected' : ''}>${value} cặp</option>`)
-      .join('')}
-          </select>
-        </label>
-        ${inPlay
-      ? '<button type="button" class="small-btn" data-matching-reset-session>Random bộ nối mới</button>'
-      : '<button type="button" class="action-btn" data-matching-start>Bắt đầu</button>'}
-      </article>
-
-      ${inPlay && leftColumn.length
+    <section class="page-card focused-exercise matching-exercise">
+      <header class="exercise-page-heading">
+        <h2>Nối từ</h2>
+        <span>${connectedCount}/${leftColumn.length} đã nối</span>
+      </header>
+      ${leftColumn.length
       ? `
-          <article class="question-card">
-            <p class="muted">Bấm 1 từ ở cột A, sau đó bấm 1 từ ở cột B để nối.</p>
-            <div class="matching-board-wrap">
-              <svg class="matching-lines" data-matching-lines aria-hidden="true"></svg>
-              <div class="matching-board">
-                <section class="matching-column">
-                  <h3>Cột A</h3>
+          <div class="matching-board-wrap">
+            <svg class="matching-lines" data-matching-lines aria-hidden="true"></svg>
+            <div class="matching-board">
+              <section class="matching-column">
+                <h3>Tiếng Anh</h3>
                   ${leftColumn
       .map((item) => {
         const matchedRightId = Number(state.matchingPairs[item.id])
@@ -1809,10 +1836,10 @@ function renderMatchingPage() {
                     `
       })
       .join('')}
-                </section>
+              </section>
 
-                <section class="matching-column">
-                  <h3>Cột B</h3>
+              <section class="matching-column">
+                <h3>Tiếng Việt</h3>
                   ${rightColumn
       .map((item) => {
         const ownerLeftId = Number(rightOwnershipMap[String(item.id)] || 0)
@@ -1832,38 +1859,13 @@ function renderMatchingPage() {
                     `
       })
       .join('')}
-                </section>
-              </div>
+              </section>
             </div>
-          </article>
-
-          <p class="score-line">Đã nối: <strong>${Object.keys(state.matchingPairs).length}/${leftColumn.length}</strong> cặp</p>
-          ${isComplete ? '<button type="button" class="action-btn" data-matching-check-result>Kiểm tra kết quả</button>' : '<p class="muted">Nối đủ tất cả cặp để hiện nút kiểm tra kết quả.</p>'}
+          </div>
+          ${isComplete ? '<button type="button" class="action-btn exercise-check-btn" data-matching-check-result>Kiểm tra</button>' : ''}
+          <button type="button" class="small-btn exercise-next-btn" data-matching-reset-session>Đổi bộ từ</button>
         `
-      : items.length ? '<p class="muted">Chọn số lượng cặp và nhấn Bắt đầu để làm bài nối từ.</p>' : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
-    </section>
-  `
-}
-
-function renderFillPage() {
-  const items = state.database.questions.fillBlank
-  const score = scoreBlanks()
-
-  return `
-    <section class="page-card">
-      <h2>Điền chỗ trống</h2>
-      ${items
-        .map(
-          (item, index) => `
-            <article class="question-card compact">
-              <p class="question-text">${escapeHtml(item.sentence).replace('___', '<span class="blank-mark">_____</span>')}</p>
-              <input data-blank-index="${index}" type="text" value="${escapeHtml(state.blankAnswers[index] || '')}" placeholder="Nhập đáp án" />
-            </article>
-          `,
-        )
-        .join('')}
-      <p class="score-line">Điểm: <strong>${score}/${items.length}</strong></p>
-      <button type="button" class="action-btn" data-check-result="fillBlank">Kiểm tra kết quả</button>
+      : items.length ? '<button type="button" class="action-btn" data-matching-start>Bắt đầu</button>' : '<p class="muted">Chưa có dữ liệu từ nối nào.</p>'}
     </section>
   `
 }
@@ -2290,8 +2292,14 @@ function attachExerciseEvents() {
     const target = event.target
 
     if (target.matches('input[data-blank-index]')) {
-      state.blankAnswers[Number(target.dataset.blankIndex)] = target.value
-      scheduleRender()
+      const index = Number(target.dataset.blankIndex)
+      state.blankAnswers[index] = target.value
+      state.fillCheckedMap[index] = false
+      state.fillFeedbackMap[index] = ''
+      const checkButton = app.querySelector('[data-fill-check]')
+      if (checkButton) checkButton.disabled = !target.value.trim()
+      app.querySelector('[data-fill-feedback]')?.remove()
+      app.querySelector('[data-fill-next-button]')?.remove()
       return
     }
 
@@ -2723,6 +2731,62 @@ function attachExerciseEvents() {
       return
     }
 
+    if (button?.matches('[data-fill-check]')) {
+      const index = state.fillCurrentIndex
+      const item = state.database.questions.fillBlank[index]
+      if (!item) return
+      const isCorrect = normalizeText(state.blankAnswers[index] || '') === normalizeText(item.answer)
+      state.fillCheckedMap[index] = isCorrect
+      state.fillFeedbackMap[index] = isCorrect
+        ? 'Chính xác!'
+        : 'Chưa đúng, hãy thử lại.'
+      render()
+      return
+    }
+
+    if (button?.matches('[data-fill-next]')) {
+      if (state.fillCurrentIndex + 1 < state.database.questions.fillBlank.length) {
+        state.fillCurrentIndex += 1
+      } else {
+        state.fillCurrentIndex = 0
+        state.blankAnswers = Array(state.database.questions.fillBlank.length).fill('')
+        state.fillCheckedMap = Array(state.database.questions.fillBlank.length).fill(false)
+        state.fillFeedbackMap = Array(state.database.questions.fillBlank.length).fill('')
+      }
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-add-token]')) {
+      const activeIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
+      const tokenIndex = Number(button.dataset.arrangeAddToken)
+      const selected = state.arrangeSelectedTokenIndexes[activeIndex] || []
+      if (!selected.includes(tokenIndex)) selected.push(tokenIndex)
+      state.arrangeSelectedTokenIndexes[activeIndex] = selected
+      state.arrangeTypedAnswers[activeIndex] = selected
+        .map((index) => state.arrangeWordBanks[activeIndex][index])
+        .join(' ')
+      state.arrangeCheckedMap[activeIndex] = false
+      state.arrangeFeedbackMap[activeIndex] = ''
+      render()
+      return
+    }
+
+    if (button?.matches('[data-arrange-remove-token]')) {
+      const activeIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
+      const tokenIndex = Number(button.dataset.arrangeRemoveToken)
+      const selected = (state.arrangeSelectedTokenIndexes[activeIndex] || [])
+        .filter((index) => index !== tokenIndex)
+      state.arrangeSelectedTokenIndexes[activeIndex] = selected
+      state.arrangeTypedAnswers[activeIndex] = selected
+        .map((index) => state.arrangeWordBanks[activeIndex][index])
+        .join(' ')
+      state.arrangeCheckedMap[activeIndex] = false
+      state.arrangeFeedbackMap[activeIndex] = ''
+      render()
+      return
+    }
+
     if (button?.matches('[data-arrange-clear-current]')) {
       if (!state.arrangeSessionIndexes.length) return
       const activeIndex = state.arrangeSessionIndexes[state.arrangeCurrentIndex] ?? 0
@@ -2730,6 +2794,7 @@ function attachExerciseEvents() {
       state.arrangeCheckedMap[activeIndex] = false
       state.arrangeShowAnswerMap[activeIndex] = false
       state.arrangeFeedbackMap[activeIndex] = ''
+      state.arrangeSelectedTokenIndexes[activeIndex] = []
       render()
       return
     }
@@ -2790,7 +2855,11 @@ function attachExerciseEvents() {
       const uncheckedIndexes = state.arrangeSessionIndexes
         .filter((index) => !state.arrangeCheckedMap[index])
 
-      if (!uncheckedIndexes.length) return
+      if (!uncheckedIndexes.length) {
+        resetArrangeSession((state.database.questions.arrange || []).length)
+        render()
+        return
+      }
 
       const randomIndex = Math.floor(Math.random() * uncheckedIndexes.length)
       const nextQuestionIndex = uncheckedIndexes[randomIndex]
