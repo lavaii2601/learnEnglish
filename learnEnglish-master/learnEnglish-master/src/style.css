@@ -789,6 +789,34 @@ p {
   justify-self: end;
 }
 
+.arrange-show-answer-btn {
+  justify-self: start;
+  border-color: #67e8f9;
+  background: linear-gradient(135deg, #ecfeff, #e0f2fe);
+  color: #155e75;
+  font-weight: 600;
+}
+
+.arrange-answer-reveal {
+  border: 1px solid #67e8f9;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #ecfeff, #eff6ff);
+  display: grid;
+  gap: 4px;
+  color: #155e75;
+}
+
+.arrange-answer-reveal span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.arrange-answer-reveal strong {
+  font-size: 0.98rem;
+}
+
 .arrange-drop-zone {
   min-height: 58px;
   border: 2px dashed #818cf8;

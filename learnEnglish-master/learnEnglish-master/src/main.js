@@ -1515,6 +1515,7 @@ function renderArrangePage() {
   const builtSentence = normalizeArrangeSentence(typedAnswer)
   const expectedSentence = normalizeArrangeSentence(currentItem?.answer)
   const currentChecked = Boolean(state.arrangeCheckedMap[activeQuestionIndex])
+  const currentShowAnswer = Boolean(state.arrangeShowAnswerMap[activeQuestionIndex])
   const feedbackText = String(state.arrangeFeedbackMap[activeQuestionIndex] || '').trim()
   const allTokensSelected = wordBank.length > 0 && selectedTokenIndexes.length === wordBank.length
 
@@ -1554,6 +1555,14 @@ function renderArrangePage() {
             </div>
 
             ${feedbackText ? `<p class="notice ${currentChecked ? 'ok' : 'error'}">${escapeHtml(feedbackText)}</p>` : ''}
+            ${currentShowAnswer
+          ? `
+              <article class="arrange-answer-reveal">
+                <span>Đáp án đúng</span>
+                <strong>${escapeHtml(expectedSentence)}</strong>
+              </article>
+            `
+          : ''}
 
             <div class="exercise-submit-row">
               <button type="button" class="exercise-reset-btn" data-arrange-clear-current aria-label="Làm lại">↶</button>
@@ -1564,6 +1573,9 @@ function renderArrangePage() {
                 ${allTokensSelected ? '' : 'disabled'}
               >Kiểm tra</button>
             </div>
+            <button type="button" class="small-btn arrange-show-answer-btn" data-arrange-show-answer>
+              ${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án đúng'}
+            </button>
 
             ${currentChecked
           ? `
