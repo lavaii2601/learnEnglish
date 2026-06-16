@@ -9,8 +9,8 @@ Vercel deploy checklist
 
 2. Environment Variables (Project Settings)
 - `SUPABASE_URL` (required)
-- `SUPABASE_SERVICE_ROLE_KEY` (recommended for backend writes)
-- Optional: `SUPABASE_ANON_KEY` (if not using service role key)
+- `SUPABASE_SERVICE_ROLE_KEY` (required for backend writes: add/edit/delete)
+- Optional: `SUPABASE_ANON_KEY` (read-only fallback; not enough for reliable add/edit/delete)
 - Optional: `ENABLE_SAMPLE_SEED=true` to seed sample data on first start
 
 3. Secrets handling
@@ -28,4 +28,6 @@ npm run dev         # frontend + backend
 
 5. Troubleshooting
 - If API returns 500 during init: ensure `SUPABASE_URL` and one of `SUPABASE_SERVICE_ROLE_KEY`/`SUPABASE_ANON_KEY` are set.
+- If add/edit/delete does not affect Supabase: set `SUPABASE_SERVICE_ROLE_KEY` in Vercel Project Settings for Production and redeploy.
+- Open `/api/health` on the deployed domain. `writeReady` must be `true` and `hasServiceRoleKey` must be `true`.
 - Check `vercel` build logs for missing env variables.

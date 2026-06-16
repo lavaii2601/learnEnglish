@@ -37,6 +37,8 @@ app.use((req, _, next) => {
 })
 
 const supabaseUrl = process.env.SUPABASE_URL
+const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)
+const hasAnonKey = Boolean(process.env.SUPABASE_ANON_KEY)
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 const shouldSeedSampleData = process.env.ENABLE_SAMPLE_SEED === 'true'
 let supabase = supabaseUrl && supabaseKey
@@ -157,6 +159,12 @@ function clearDatabaseResponseCache() {
 function assertSupabaseConfigured() {
   if (supabase) return
   throw new Error('Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY trong biến môi trường.')
+}
+
+function assertSupabaseWriteConfigured() {
+  assertSupabaseConfigured()
+  if (hasServiceRoleKey || process.env.FORCE_LOCAL_MOCK === 'true' || process.env.NODE_ENV === 'development') return
+  throw new Error('Server deploy chưa có SUPABASE_SERVICE_ROLE_KEY. Các thao tác thêm/sửa/xóa trên Supabase cần service role key trong Vercel Environment Variables.')
 }
 
 function toQuestionType(type) {
@@ -680,7 +688,25 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
 }
 
 app.get('/api/health', (_, res) => {
-  res.json({ ok: true })
+  res.json({
+    ok: true,
+    supabaseConfigured: Boolean(supabaseUrl && supabaseKey),
+    hasServiceRoleKey,
+    hasAnonKey,
+    writeReady: Boolean(supabaseUrl && hasServiceRoleKey),
+    nodeEnv: process.env.NODE_ENV || '',
+  })
+})
+
+app.use('/api', (req, _, next) => {
+  try {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      assertSupabaseWriteConfigured()
+    }
+    next()
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.get('/api/database', async (req, res, next) => {
@@ -1150,7 +1176,7 @@ app.use((error, _, res, __) => {
       message: 'Chưa có bảng Supabase. Hãy chạy SQL trong file supabase/schema.sql trước.',
     })
   }
-  return res.status(500).json({ message: 'Lỗi máy chủ nội bộ' })
+  return res.status(500).json({ message: message || 'Lỗi máy chủ nội bộ' })
 })
 
 async function start() {
