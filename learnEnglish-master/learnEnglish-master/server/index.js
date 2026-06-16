@@ -94,22 +94,23 @@ app.use((req, _, next) => {
   if (req.method !== 'POST') return next()
 
   const currentUrl = normalizePathFromRequestUrl(req.url)
+  const currentPath = currentUrl.split('?')[0]
   const id = normalizeRouteId(req.body?.id)
 
-  if (currentUrl === '/api/vocabulary-update') {
+  if (currentPath === '/api/vocabulary-update') {
     if (!id) return next()
     req.method = 'PUT'
     req.url = `/api/vocabulary/${encodeURIComponent(id)}`
     req.body = req.body?.payload || {}
   }
 
-  if (currentUrl === '/api/vocabulary-delete') {
+  if (currentPath === '/api/vocabulary-delete') {
     if (!id) return next()
     req.method = 'DELETE'
     req.url = `/api/vocabulary/${encodeURIComponent(id)}`
   }
 
-  if (currentUrl === '/api/question-update') {
+  if (currentPath === '/api/question-update') {
     const type = toQuestionType(req.body?.type)
     if (!type || !id) return next()
     req.method = 'PUT'
@@ -117,7 +118,7 @@ app.use((req, _, next) => {
     req.body = req.body?.payload || {}
   }
 
-  if (currentUrl === '/api/question-delete') {
+  if (currentPath === '/api/question-delete') {
     const type = toQuestionType(req.body?.type)
     if (!type || !id) return next()
     req.method = 'DELETE'
