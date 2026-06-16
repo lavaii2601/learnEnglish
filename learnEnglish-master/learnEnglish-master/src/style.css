@@ -1151,6 +1151,15 @@ textarea {
   box-shadow: 0 2px 6px rgba(52, 97, 168, 0.22);
 }
 
+.action-btn:disabled {
+  border-color: #b7c4d6;
+  background: #b7c4d6;
+  color: #fff;
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .action-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

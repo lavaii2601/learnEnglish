@@ -52,6 +52,7 @@ const state = {
   matchingPairs: {},
   matchingSelectedLeftId: null,
   matchingChecked: false,
+  matchingShowAnswer: false,
   matchingSessionPhase: 'setup',
   blankAnswers: [],
   fillQuestionCount: 5,
@@ -93,6 +94,7 @@ const state = {
   mcqExcludeCorrectEnabled: true,
   mcqCorrectQuestionIds: [],
   mcqCurrentIndex: 0,
+  mcqShowAnswerMap: [],
   mcqNextPromptOpen: false,
   mcqReviewOpen: false,
   mcqWrongQuestions: [],
@@ -575,6 +577,7 @@ function resetMatchingSession(totalQuestions = (state.database.questions.matchin
     state.matchingPairs = {}
     state.matchingSelectedLeftId = null
     state.matchingChecked = false
+    state.matchingShowAnswer = false
     state.matchingSessionPhase = 'setup'
     return
   }
@@ -588,6 +591,7 @@ function resetMatchingSession(totalQuestions = (state.database.questions.matchin
   state.matchingPairs = {}
   state.matchingSelectedLeftId = selectedIds[0] || null
   state.matchingChecked = false
+  state.matchingShowAnswer = false
   state.matchingSessionPhase = 'playing'
 }
 
@@ -597,6 +601,7 @@ function clearMatchingSession() {
   state.matchingPairs = {}
   state.matchingSelectedLeftId = null
   state.matchingChecked = false
+  state.matchingShowAnswer = false
   state.matchingSessionPhase = 'setup'
 }
 
@@ -676,6 +681,7 @@ function startMcqQuizRound(options = {}) {
   state.mcqQuizQuestions = quizItems
   state.mcqAnswers = Array(quizItems.length).fill('')
   state.mcqCurrentIndex = 0
+  state.mcqShowAnswerMap = Array(quizItems.length).fill(false)
   state.mcqNextPromptOpen = false
   state.mcqReviewOpen = false
   state.mcqSessionPhase = 'playing'
@@ -694,6 +700,7 @@ function resetExerciseState() {
   state.mcqQuizQuestions = []
   state.mcqAnswers = []
   state.mcqCurrentIndex = 0
+  state.mcqShowAnswerMap = []
   state.mcqNextPromptOpen = false
   state.mcqReviewOpen = false
   state.mcqSessionPhase = 'setup'
@@ -1716,6 +1723,7 @@ function renderArrangePage() {
             </div>
             <div class="mcq-complete-actions">
               <button type="button" class="small-btn" data-arrange-next-question ${currentIndex + 1 < totalCount ? '' : 'disabled'}>Câu kế tiếp</button>
+              <button type="button" class="small-btn" data-arrange-check-current ${allTokensSelected ? '' : 'disabled'}>Kiểm tra câu này</button>
               ${!completed
           ? `<button type="button" class="small-btn arrange-show-answer-btn" data-arrange-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án đúng'}</button>`
           : ''}
@@ -1725,7 +1733,7 @@ function renderArrangePage() {
           ? '<button type="button" class="small-btn exercise-next-btn" data-arrange-reset-session>Làm bộ câu mới</button>'
           : canSubmit
             ? '<button type="button" class="action-btn exercise-check-btn" data-arrange-submit>Kiểm tra kết quả</button>'
-            : `<p class="muted">Đã sắp xếp đủ từ: <strong>${answeredCount}/${totalCount}</strong> câu. Nút kiểm tra kết quả sẽ xuất hiện khi bạn làm đủ.</p>`}
+            : `<button type="button" class="action-btn exercise-check-btn" data-arrange-submit disabled>Kiểm tra kết quả</button>`}
           `
       : setupVisible ? '' : '<p class="muted">Chưa có câu hỏi sắp xếp nào.</p>'}
     </section>
@@ -1783,7 +1791,7 @@ function renderFillPage() {
             ${completed ? 'disabled' : ''}
           />
           ${feedback ? `<p class="notice ${checked ? 'ok' : 'error'}" data-fill-feedback>${escapeHtml(feedback)}</p>` : ''}
-          ${completed && item.answer
+          ${(completed || feedback) && item.answer
           ? `<article class="writing-answer-reveal" data-fill-answer>
               <span>Đáp án đúng</span>
               <strong>${escapeHtml(item.answer || '')}</strong>
@@ -1793,12 +1801,13 @@ function renderFillPage() {
           <div class="mcq-complete-actions">
             <button type="button" class="small-btn" data-fill-prev ${currentIndex > 0 ? '' : 'disabled'}>Câu trước</button>
             <button type="button" class="small-btn" data-fill-next-question ${currentIndex + 1 < totalCount ? '' : 'disabled'}>Câu kế tiếp</button>
+            <button type="button" class="small-btn" data-fill-check ${answer.trim() ? '' : 'disabled'}>Kiểm tra câu này</button>
           </div>
           ${completed
           ? '<button type="button" class="small-btn" data-fill-reset-session>Làm bộ câu mới</button>'
           : canSubmit
             ? '<button type="button" class="action-btn exercise-check-btn" data-fill-submit>Kiểm tra kết quả</button>'
-            : '<p class="muted">Nút kiểm tra kết quả sẽ xuất hiện khi bạn trả lời đủ số câu đã chọn.</p>'}
+            : '<button type="button" class="action-btn exercise-check-btn" data-fill-submit disabled>Kiểm tra kết quả</button>'}
         `
       : setupVisible ? '' : '<p class="muted">Chưa có câu hỏi điền chỗ trống nào.</p>'}
     </section>
@@ -1823,6 +1832,7 @@ function renderMcqPage() {
   const inPlay = state.mcqSessionPhase === 'playing'
   const currentQuestion = questions[state.mcqCurrentIndex]
   const canSubmit = inPlay && questions.length > 0 && answeredCount === questions.length
+  const currentAnswerShown = Boolean(state.mcqShowAnswerMap[state.mcqCurrentIndex])
 
   const setupPanel = setupVisible
     ? `
@@ -1886,10 +1896,19 @@ function renderMcqPage() {
         <div class="mcq-complete-actions">
           <button type="button" class="small-btn" data-mcq-prev ${state.mcqCurrentIndex > 0 ? '' : 'disabled'}>Câu trước</button>
           <button type="button" class="small-btn" data-mcq-next ${state.mcqCurrentIndex + 1 < questions.length ? '' : 'disabled'}>Câu kế tiếp</button>
+          <button type="button" class="small-btn" data-mcq-show-current-answer>
+            ${currentAnswerShown ? 'Ẩn đáp án' : 'Xem đáp án đúng'}
+          </button>
         </div>
+        ${currentAnswerShown
+          ? `<article class="writing-answer-reveal">
+              <span>Đáp án đúng</span>
+              <strong>${escapeHtml(currentQuestion.answer)}</strong>
+            </article>`
+          : ''}
         ${canSubmit
           ? '<button type="button" class="action-btn" data-check-result="mcq">Kiểm tra kết quả</button>'
-          : '<p class="muted">Nút kiểm tra kết quả sẽ xuất hiện khi bạn trả lời hết tất cả câu hỏi.</p>'}
+          : '<button type="button" class="action-btn" data-check-result="mcq" disabled>Kiểm tra kết quả</button>'}
       </section>
     `
     : ''
@@ -2042,8 +2061,11 @@ function renderMatchingPage() {
               </section>
             </div>
           </div>
-          ${isComplete ? '<button type="button" class="action-btn exercise-check-btn" data-matching-check-result>Kiểm tra kết quả</button>' : '<p class="muted">Nút kiểm tra kết quả sẽ xuất hiện khi bạn nối đủ tất cả cặp từ.</p>'}
-          ${state.matchingChecked
+          <div class="mcq-complete-actions">
+            <button type="button" class="action-btn exercise-check-btn" data-matching-check-result ${isComplete ? '' : 'disabled'}>Kiểm tra kết quả</button>
+            <button type="button" class="small-btn" data-matching-show-answer>${state.matchingShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án đúng'}</button>
+          </div>
+          ${(state.matchingChecked || state.matchingShowAnswer)
           ? `
             <article class="matching-answer-reveal">
               <span>Đáp án đúng</span>
@@ -2077,7 +2099,7 @@ function renderWritingPage() {
   const currentSelectable = clampQuestionCount(state.writingQuestionCount, maxSelectable)
   const setupVisible = state.writingSessionPhase !== 'playing' && state.writingSessionPhase !== 'completed'
   const completed = state.writingSessionPhase === 'completed'
-  const shouldShowCorrectAnswer = Boolean(completed && item?.answer)
+  const shouldShowCorrectAnswer = Boolean((completed || feedback) && item?.answer)
   const answeredCount = sessionIndexes.filter((index) => String(state.writingAnswers[index] || '').trim()).length
   const canSubmit = totalCount > 0 && answeredCount === totalCount
 
@@ -2122,12 +2144,13 @@ function renderWritingPage() {
           <div class="mcq-complete-actions">
             <button type="button" class="small-btn" data-writing-prev ${currentIndex > 0 ? '' : 'disabled'}>Câu trước</button>
             <button type="button" class="small-btn" data-writing-next-question ${currentIndex + 1 < totalCount ? '' : 'disabled'}>Câu kế tiếp</button>
+            <button type="button" class="small-btn" data-writing-check ${answer.trim() ? '' : 'disabled'}>Kiểm tra câu này</button>
           </div>
           ${completed
           ? '<button type="button" class="small-btn" data-writing-reset-session>Làm bộ câu mới</button>'
           : canSubmit
             ? '<button type="button" class="action-btn exercise-check-btn" data-writing-submit>Kiểm tra kết quả</button>'
-            : '<p class="muted">Nút kiểm tra kết quả sẽ xuất hiện khi bạn trả lời đủ số câu đã chọn.</p>'}
+            : '<button type="button" class="action-btn exercise-check-btn" data-writing-submit disabled>Kiểm tra kết quả</button>'}
         `
       : setupVisible ? '' : '<p class="muted">Chưa có dữ liệu câu hỏi + câu trả lời.</p>'}
     </section>
@@ -2219,13 +2242,14 @@ function renderListingPage() {
             <div class="mcq-complete-actions">
               <button type="button" class="small-btn" data-listing-prev ${currentIndex > 0 ? '' : 'disabled'}>Câu trước</button>
               <button type="button" class="small-btn" data-listing-next-question ${currentIndex + 1 < totalCount ? '' : 'disabled'}>Câu kế tiếp</button>
-              ${completed ? `<button type="button" class="small-btn" data-listing-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án đúng'}</button>` : ''}
+              <button type="button" class="small-btn" data-listing-check-current ${String(state.listingAnswers[activeQuestionIndex] || '').trim() ? '' : 'disabled'}>Kiểm tra câu này</button>
+              <button type="button" class="small-btn" data-listing-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án đúng'}</button>
             </div>
             ${completed
         ? '<button type="button" class="small-btn" data-listing-reset-session>Làm bộ câu mới</button>'
         : canSubmit
           ? '<button type="button" class="action-btn" data-listing-submit>Kiểm tra kết quả</button>'
-          : `<p class="muted">Đã trả lời: <strong>${answeredCount}/${totalCount}</strong> câu. Nút kiểm tra kết quả sẽ xuất hiện khi bạn nhập đủ.</p>`}
+          : `<button type="button" class="action-btn" data-listing-submit disabled>Kiểm tra kết quả</button>`}
           `
       : setupVisible ? '' : '<p class="muted">Chưa có câu hỏi liệt kê nào.</p>'}
       ${!setupVisible ? `<p class="score-line">Đã kiểm tra: <strong>${checkedCount}/${totalCount}</strong> câu</p>` : ''}
@@ -2536,6 +2560,7 @@ function attachExerciseEvents() {
       const checkButton = app.querySelector('[data-fill-check]')
       if (checkButton) checkButton.disabled = !target.value.trim()
       app.querySelector('[data-fill-feedback]')?.remove()
+      app.querySelector('[data-fill-answer]')?.remove()
       app.querySelector('[data-fill-next-button]')?.remove()
       return
     }
@@ -3037,7 +3062,7 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-fill-check]')) {
-      const index = state.fillCurrentIndex
+      const index = state.fillSessionIndexes[state.fillCurrentIndex] ?? state.fillCurrentIndex
       const item = state.database.questions.fillBlank[index]
       if (!item) return
       const isCorrect = normalizeText(state.blankAnswers[index] || '') === normalizeText(item.answer)
@@ -3091,7 +3116,7 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-writing-check]')) {
-      const index = state.writingCurrentIndex
+      const index = state.writingSessionIndexes[state.writingCurrentIndex] ?? state.writingCurrentIndex
       const item = state.database.questions.mcq[index]
       if (!item) return
       const isCorrect = normalizeText(state.writingAnswers[index] || '') === normalizeText(item.answer || '')
@@ -3183,6 +3208,7 @@ function attachExerciseEvents() {
         state.arrangeCheckedMap[activeIndex] = false
         state.arrangeFeedbackMap[activeIndex] = 'Chưa đúng. Hãy sắp xếp lại và nhập đúng hoàn toàn theo ký tự.'
       }
+      state.arrangeShowAnswerMap[activeIndex] = true
 
       render()
       return
@@ -3475,7 +3501,14 @@ function attachExerciseEvents() {
     if (button?.matches('[data-matching-check-result]')) {
       if (!isMatchingRoundComplete()) return
       state.matchingChecked = true
+      state.matchingShowAnswer = true
       openResultNotice('matching')
+      return
+    }
+
+    if (button?.matches('[data-matching-show-answer]')) {
+      state.matchingShowAnswer = !state.matchingShowAnswer
+      render()
       return
     }
 
@@ -3497,6 +3530,13 @@ function attachExerciseEvents() {
       startMcqQuizRound({
         useWrongOnly: true,
       })
+      render()
+      return
+    }
+
+    if (button?.matches('[data-mcq-show-current-answer]')) {
+      if (!state.mcqQuizQuestions.length) return
+      state.mcqShowAnswerMap[state.mcqCurrentIndex] = !state.mcqShowAnswerMap[state.mcqCurrentIndex]
       render()
       return
     }
