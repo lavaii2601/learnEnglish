@@ -413,6 +413,11 @@ function assertNoSupabaseError(error, fallbackMessage) {
   throw new Error(error.message || fallbackMessage)
 }
 
+function normalizeRouteId(rawId) {
+  const id = String(rawId || '').trim()
+  return id || null
+}
+
 async function deleteRowById(table, id, fallbackMessage) {
   const deleteQuery = supabase
     .from(table)
@@ -814,7 +819,7 @@ app.post('/api/vocabulary', async (req, res, next) => {
 
 app.put('/api/vocabulary/:id', async (req, res, next) => {
   try {
-    const id = Number(req.params.id)
+    const id = normalizeRouteId(req.params.id)
     const word = String(req.body.word || '').trim()
     const definition = String(req.body.definition || '').trim()
     const example = String(req.body.example || '').trim()
@@ -839,7 +844,7 @@ app.put('/api/vocabulary/:id', async (req, res, next) => {
 
 app.post('/api/vocabulary/:id/progress', async (req, res, next) => {
   try {
-    const id = Number(req.params.id)
+    const id = normalizeRouteId(req.params.id)
     if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
 
     const correct = Boolean(req.body.correct)
@@ -868,7 +873,7 @@ app.post('/api/vocabulary/:id/progress', async (req, res, next) => {
 
 app.delete('/api/vocabulary/:id', async (req, res, next) => {
   try {
-    const id = Number(req.params.id)
+    const id = normalizeRouteId(req.params.id)
     if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
 
     await deleteRowById('vocabulary', id, 'Không thể xóa từ vựng')
@@ -881,7 +886,7 @@ app.delete('/api/vocabulary/:id', async (req, res, next) => {
 
 app.post('/api/vocabulary/:id/delete', async (req, res, next) => {
   try {
-    const id = Number(req.params.id)
+    const id = normalizeRouteId(req.params.id)
     if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
 
     await deleteRowById('vocabulary', id, 'Không thể xóa từ vựng')
@@ -1017,7 +1022,7 @@ app.post('/api/questions', async (req, res, next) => {
 app.put('/api/questions/:type/:id', async (req, res, next) => {
   try {
     const type = toQuestionType(req.params.type)
-    const id = Number(req.params.id)
+    const id = normalizeRouteId(req.params.id)
 
     if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
 
@@ -1144,7 +1149,7 @@ app.put('/api/questions/:type/:id', async (req, res, next) => {
 app.delete('/api/questions/:type/:id', async (req, res, next) => {
   try {
     const type = toQuestionType(req.params.type)
-    const id = Number(req.params.id)
+    const id = normalizeRouteId(req.params.id)
 
     if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
 
@@ -1181,7 +1186,7 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
 app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
   try {
     const type = toQuestionType(req.params.type)
-    const id = Number(req.params.id)
+    const id = normalizeRouteId(req.params.id)
 
     if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
 

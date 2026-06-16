@@ -93,23 +93,24 @@ export function createVocabulary(payload) {
 }
 
 export function updateVocabulary(id, payload) {
-  return request(`/api/vocabulary/${id}`, {
+  return request(`/api/vocabulary/${encodeURIComponent(String(id))}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
 }
 
 export function updateVocabularyProgress(id, correct) {
-  return request(`/api/vocabulary/${id}/progress`, {
+  return request(`/api/vocabulary/${encodeURIComponent(String(id))}/progress`, {
     method: 'POST',
     body: JSON.stringify({ correct }),
   })
 }
 
 export function deleteVocabulary(id) {
+  const safeId = encodeURIComponent(String(id))
   return requestWithDeleteFallback(
-    `/api/vocabulary/${id}`,
-    `/api/vocabulary/${id}/delete`,
+    `/api/vocabulary/${safeId}`,
+    `/api/vocabulary/${safeId}/delete`,
   )
 }
 
@@ -121,15 +122,17 @@ export function createQuestion(payload) {
 }
 
 export function updateQuestion(type, id, payload) {
-  return request(`/api/questions/${type}/${id}`, {
+  return request(`/api/questions/${encodeURIComponent(String(type))}/${encodeURIComponent(String(id))}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
 }
 
 export function deleteQuestion(type, id) {
+  const safeType = encodeURIComponent(String(type))
+  const safeId = encodeURIComponent(String(id))
   return requestWithDeleteFallback(
-    `/api/questions/${type}/${id}`,
-    `/api/questions/${type}/${id}/delete`,
+    `/api/questions/${safeType}/${safeId}`,
+    `/api/questions/${safeType}/${safeId}/delete`,
   )
 }

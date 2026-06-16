@@ -217,6 +217,15 @@ function normalizeText(text) {
   return text.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+function normalizeEntityId(rawId) {
+  const id = String(rawId || '').trim()
+  return id || null
+}
+
+function idsEqual(left, right) {
+  return normalizeEntityId(left) === normalizeEntityId(right)
+}
+
 function cleanListLine(text) {
   return String(text || '')
     .replace(/^\s*(?:[-*•]|\d+[.)-])\s*/, '')
@@ -989,7 +998,7 @@ function renderEditDialog() {
 
 async function submitEditDialog(formData) {
   const kind = String(formData.get('kind') || '').trim()
-  const id = Number(formData.get('id'))
+  const id = normalizeEntityId(formData.get('id'))
   if (!kind || !id) return false
 
   if (kind === 'vocab') {
@@ -2299,8 +2308,8 @@ function renderSourceMatching() {
                     <p><strong>Cột B:</strong> ${escapeHtml(item.meaning)}</p>
                   </div>
                   <div class="row-actions">
-                    <button class="small-btn" data-edit-source-matching="${item.id}">Sửa</button>
-                    <button class="small-btn danger" data-delete-source-matching="${item.id}">Xóa</button>
+                    <button type="button" class="small-btn" data-edit-source-matching="${item.id}">Sửa</button>
+                    <button type="button" class="small-btn danger" data-delete-source-matching="${item.id}">Xóa</button>
                   </div>
                 </article>
               `,
@@ -2342,8 +2351,8 @@ function renderSourceVocab() {
                   <p>${escapeHtml(item.definition)}</p>
                 </div>
                 <div class="row-actions">
-                  <button class="small-btn" data-edit-vocab="${item.id}">Sửa</button>
-                  <button class="small-btn danger" data-delete-vocab="${item.id}">Xóa</button>
+                  <button type="button" class="small-btn" data-edit-vocab="${item.id}">Sửa</button>
+                  <button type="button" class="small-btn danger" data-delete-vocab="${item.id}">Xóa</button>
                 </div>
               </article>
             `,
@@ -2429,8 +2438,8 @@ function renderSourceQuestion() {
                     <p class="muted">Đáp án: ${escapeHtml(item.answer)}</p>
                   </div>
                   <div class="row-actions">
-                    <button class="small-btn" data-edit-question-answer="${item.id}">Sửa</button>
-                    <button class="small-btn danger" data-delete-question-answer="${item.id}">Xóa</button>
+                    <button type="button" class="small-btn" data-edit-question-answer="${item.id}">Sửa</button>
+                    <button type="button" class="small-btn danger" data-delete-question-answer="${item.id}">Xóa</button>
                   </div>
                 </article>
               `,
@@ -2453,8 +2462,8 @@ function renderSourceQuestion() {
                     <p class="muted">Đáp án mẫu theo dòng: ${escapeHtml((item.answers || []).join(' | '))}</p>
                   </div>
                   <div class="row-actions">
-                    <button class="small-btn" data-edit-shared-list-question="${item.questionType}:${item.id}">Sửa</button>
-                    <button class="small-btn danger" data-delete-shared-list-question="${item.questionType}:${item.id}">Xóa</button>
+                    <button type="button" class="small-btn" data-edit-shared-list-question="${item.questionType}:${item.id}">Sửa</button>
+                    <button type="button" class="small-btn danger" data-delete-shared-list-question="${item.questionType}:${item.id}">Xóa</button>
                   </div>
                 </article>
               `,
@@ -2476,8 +2485,8 @@ function renderSourceQuestion() {
                     <p class="muted">Đáp án đúng: ${escapeHtml(item.answer)}</p>
                   </div>
                   <div class="row-actions">
-                    <button class="small-btn" data-edit-arrange-question="${item.id}">Sửa</button>
-                    <button class="small-btn danger" data-delete-arrange-question="${item.id}">Xóa</button>
+                    <button type="button" class="small-btn" data-edit-arrange-question="${item.id}">Sửa</button>
+                    <button type="button" class="small-btn danger" data-delete-arrange-question="${item.id}">Xóa</button>
                   </div>
                 </article>
               `,
@@ -2879,7 +2888,7 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-delete-vocab]')) {
-      const id = Number(button.dataset.deleteVocab)
+      const id = normalizeEntityId(button.dataset.deleteVocab)
       if (!id) return
       withRefresh(
         async () => {
@@ -2891,7 +2900,7 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-delete-source-matching]')) {
-      const id = Number(button.dataset.deleteSourceMatching)
+      const id = normalizeEntityId(button.dataset.deleteSourceMatching)
       if (!id) return
       withRefresh(
         async () => {
@@ -2903,7 +2912,7 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-delete-question-answer]')) {
-      const id = Number(button.dataset.deleteQuestionAnswer)
+      const id = normalizeEntityId(button.dataset.deleteQuestionAnswer)
       if (!id) return
       withRefresh(
         async () => {
@@ -2917,7 +2926,7 @@ function attachExerciseEvents() {
     if (button?.matches('[data-delete-shared-list-question]')) {
       const token = String(button.dataset.deleteSharedListQuestion || '')
       const [questionType, rawId] = token.split(':')
-      const id = Number(rawId)
+      const id = normalizeEntityId(rawId)
       if (!id) return
 
       withRefresh(
@@ -2930,7 +2939,7 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-delete-arrange-question]')) {
-      const id = Number(button.dataset.deleteArrangeQuestion)
+      const id = normalizeEntityId(button.dataset.deleteArrangeQuestion)
       if (!id) return
 
       withRefresh(
@@ -2945,7 +2954,7 @@ function attachExerciseEvents() {
     if (button?.matches('[data-delete-question]')) {
       const token = String(button.dataset.deleteQuestion || '')
       const [questionType, rawId] = token.split(':')
-      const id = Number(rawId)
+      const id = normalizeEntityId(rawId)
       if (!questionType || !id) return
 
       withRefresh(
@@ -3299,8 +3308,8 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-edit-vocab]')) {
-      const id = Number(button.dataset.editVocab)
-      const item = state.database.vocabulary.find((entry) => entry.id === id)
+      const id = normalizeEntityId(button.dataset.editVocab)
+      const item = state.database.vocabulary.find((entry) => idsEqual(entry.id, id))
       if (!item) return
 
       openEditDialog({
@@ -3315,8 +3324,8 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-edit-source-matching]')) {
-      const id = Number(button.dataset.editSourceMatching)
-      const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
+      const id = normalizeEntityId(button.dataset.editSourceMatching)
+      const item = (state.database.questions.matching || []).find((entry) => idsEqual(entry.id, id))
       if (!item) return
 
       openEditDialog({
@@ -3329,8 +3338,8 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-edit-question-answer]')) {
-      const id = Number(button.dataset.editQuestionAnswer)
-      const item = (state.database.questions.mcq || []).find((entry) => entry.id === id)
+      const id = normalizeEntityId(button.dataset.editQuestionAnswer)
+      const item = (state.database.questions.mcq || []).find((entry) => idsEqual(entry.id, id))
       if (!item) return
 
       openEditDialog({
@@ -3345,11 +3354,11 @@ function attachExerciseEvents() {
     if (button?.matches('[data-edit-question]')) {
       const token = String(button.dataset.editQuestion || '')
       const [questionType, rawId] = token.split(':')
-      const id = Number(rawId)
+      const id = normalizeEntityId(rawId)
       if (!questionType || !id) return
 
       if (questionType === 'mcq') {
-        const item = (state.database.questions.mcq || []).find((entry) => entry.id === id)
+        const item = (state.database.questions.mcq || []).find((entry) => idsEqual(entry.id, id))
         if (!item) return
         openEditDialog({
           kind: 'mcq',
@@ -3361,7 +3370,7 @@ function attachExerciseEvents() {
       }
 
       if (questionType === 'matching') {
-        const item = (state.database.questions.matching || []).find((entry) => entry.id === id)
+        const item = (state.database.questions.matching || []).find((entry) => idsEqual(entry.id, id))
         if (!item) return
         openEditDialog({
           kind: 'matching',
@@ -3373,7 +3382,7 @@ function attachExerciseEvents() {
       }
 
       if (questionType === 'fillBlank') {
-        const item = (state.database.questions.fillBlank || []).find((entry) => entry.id === id)
+        const item = (state.database.questions.fillBlank || []).find((entry) => idsEqual(entry.id, id))
         if (!item) return
         openEditDialog({
           kind: 'fillBlank',
@@ -3390,7 +3399,7 @@ function attachExerciseEvents() {
           : questionType === 'listing'
             ? (state.database.questions.listing || [])
             : (state.database.questions.arrange || [])
-        const item = sourceList.find((entry) => entry.id === id)
+        const item = sourceList.find((entry) => idsEqual(entry.id, id))
         if (!item) return
 
         openEditDialog({
@@ -3423,13 +3432,13 @@ function attachExerciseEvents() {
     if (button?.matches('[data-edit-shared-list-question]')) {
       const token = String(button.dataset.editSharedListQuestion || '')
       const [questionType, rawId] = token.split(':')
-      const id = Number(rawId)
+      const id = normalizeEntityId(rawId)
       if (!questionType || !id) return
 
       const sourceList = questionType === 'writing'
         ? (state.database.questions.writing || [])
         : (state.database.questions.listing || [])
-      const item = sourceList.find((entry) => entry.id === id)
+      const item = sourceList.find((entry) => idsEqual(entry.id, id))
       if (!item) return
 
       openEditDialog({
@@ -3452,8 +3461,8 @@ function attachExerciseEvents() {
     }
 
     if (button?.matches('[data-edit-arrange-question]')) {
-      const id = Number(button.dataset.editArrangeQuestion)
-      const item = (state.database.questions.arrange || []).find((entry) => entry.id === id)
+      const id = normalizeEntityId(button.dataset.editArrangeQuestion)
+      const item = (state.database.questions.arrange || []).find((entry) => idsEqual(entry.id, id))
       if (!item) return
 
       openEditDialog({
