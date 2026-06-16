@@ -1716,6 +1716,9 @@ function renderArrangePage() {
             </div>
             <div class="mcq-complete-actions">
               <button type="button" class="small-btn" data-arrange-next-question ${currentIndex + 1 < totalCount ? '' : 'disabled'}>Câu kế tiếp</button>
+              ${!completed
+          ? `<button type="button" class="small-btn arrange-show-answer-btn" data-arrange-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án đúng'}</button>`
+          : ''}
             </div>
 
             ${completed
@@ -2488,7 +2491,6 @@ function attachExerciseEvents() {
       state.listingQuestionCount = clampQuestionCount(target.value, (state.database.questions.listing || []).length)
       state.listingSessionIndexes = []
       state.listingSessionPhase = 'setup'
-      render()
       return
     }
 
@@ -2496,14 +2498,12 @@ function attachExerciseEvents() {
       state.arrangeQuestionCount = clampQuestionCount(target.value, (state.database.questions.arrange || []).length)
       state.arrangeSessionIndexes = []
       state.arrangeSessionPhase = 'setup'
-      render()
       return
     }
 
     if (target.matches('[data-matching-question-count]')) {
       state.matchingQuestionCount = clampQuestionCount(target.value, (state.database.questions.matching || []).length)
       clearMatchingSession()
-      render()
       return
     }
 
@@ -2515,7 +2515,6 @@ function attachExerciseEvents() {
 
     if (target.matches('[data-mcq-question-count]')) {
       state.mcqQuestionCount = clampQuestionCount(target.value, state.mcqPoolQuestions.length)
-      render()
       return
     }
 
@@ -2780,7 +2779,6 @@ function attachExerciseEvents() {
       state.fillQuestionCount = clampQuestionCount(target.value, (state.database.questions.fillBlank || []).length)
       state.fillSessionIndexes = []
       state.fillSessionPhase = 'setup'
-      render()
       return
     }
 
@@ -2788,7 +2786,6 @@ function attachExerciseEvents() {
       state.writingQuestionCount = clampQuestionCount(target.value, (state.database.questions.mcq || []).length)
       state.writingSessionIndexes = []
       state.writingSessionPhase = 'setup'
-      render()
       return
     }
 
