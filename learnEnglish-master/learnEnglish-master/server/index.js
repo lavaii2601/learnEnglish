@@ -90,6 +90,43 @@ app.use((req, _, next) => {
   next()
 })
 
+app.use((req, _, next) => {
+  if (req.method !== 'POST') return next()
+
+  const currentUrl = normalizePathFromRequestUrl(req.url)
+  const id = normalizeRouteId(req.body?.id)
+
+  if (currentUrl === '/api/vocabulary-update') {
+    if (!id) return next()
+    req.method = 'PUT'
+    req.url = `/api/vocabulary/${encodeURIComponent(id)}`
+    req.body = req.body?.payload || {}
+  }
+
+  if (currentUrl === '/api/vocabulary-delete') {
+    if (!id) return next()
+    req.method = 'DELETE'
+    req.url = `/api/vocabulary/${encodeURIComponent(id)}`
+  }
+
+  if (currentUrl === '/api/question-update') {
+    const type = toQuestionType(req.body?.type)
+    if (!type || !id) return next()
+    req.method = 'PUT'
+    req.url = `/api/questions/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+    req.body = req.body?.payload || {}
+  }
+
+  if (currentUrl === '/api/question-delete') {
+    const type = toQuestionType(req.body?.type)
+    if (!type || !id) return next()
+    req.method = 'DELETE'
+    req.url = `/api/questions/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+  }
+
+  next()
+})
+
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseWriteKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
 const supabaseReadKey = process.env.SUPABASE_PUBLISHABLE_KEY
