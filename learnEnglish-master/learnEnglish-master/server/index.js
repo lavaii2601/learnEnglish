@@ -1,7 +1,49 @@
 import cors from 'cors'
 import express from 'express'
-import { pathToFileURL } from 'node:url'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
+
+function loadEnvFileIfPresent() {
+  const serverDir = path.dirname(fileURLToPath(import.meta.url))
+  const candidates = [
+    path.join(process.cwd(), '.env'),
+    path.join(serverDir, '..', '.env'),
+    path.join(serverDir, '..', '..', '..', '.env'),
+  ]
+  const seen = new Set()
+
+  for (const candidate of candidates) {
+    const envPath = path.resolve(candidate)
+    if (seen.has(envPath) || !fs.existsSync(envPath)) continue
+    seen.add(envPath)
+
+    const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/)
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+
+      const separatorIndex = trimmed.indexOf('=')
+      if (separatorIndex <= 0) continue
+
+      const key = trimmed.slice(0, separatorIndex).trim()
+      let value = trimmed.slice(separatorIndex + 1).trim()
+      if (!key || Object.prototype.hasOwnProperty.call(process.env, key)) continue
+
+      if (
+        (value.startsWith('"') && value.endsWith('"'))
+        || (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1)
+      }
+
+      process.env[key] = value
+    }
+  }
+}
+
+loadEnvFileIfPresent()
 
 const app = express()
 const PORT = Number(process.env.PORT || 3001)
