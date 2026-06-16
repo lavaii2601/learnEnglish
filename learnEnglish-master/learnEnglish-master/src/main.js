@@ -976,8 +976,8 @@ function renderEditDialog() {
 
   return `
     <div class="edit-overlay" data-close-edit-dialog="true">
-      <section class="edit-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
-        <h3>${escapeHtml(title)}</h3>
+      <section class="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-dialog-title">
+        <h3 id="edit-dialog-title">${escapeHtml(title)}</h3>
         <p class="muted">Chỉnh sửa dữ liệu trực tiếp trong popup, sau đó lưu để cập nhật ngay.</p>
         <form data-edit-dialog-form>
           <input type="hidden" name="kind" value="${escapeHtml(dialog.kind)}" />
@@ -1435,8 +1435,8 @@ function renderLayout(content) {
       ${state.resultNotice
         ? `
           <div class="result-overlay" data-close-result="true">
-            <section class="result-dialog" role="dialog" aria-modal="true" aria-label="Thông báo kết quả">
-              <h3>${escapeHtml(state.resultNotice.title)}</h3>
+            <section class="result-dialog" role="dialog" aria-modal="true" aria-labelledby="result-dialog-title">
+              <h3 id="result-dialog-title">${escapeHtml(state.resultNotice.title)}</h3>
               <p>${escapeHtml(state.resultNotice.message)}</p>
               ${state.encouragementImageUrl
     ? `
