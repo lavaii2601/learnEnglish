@@ -73,6 +73,16 @@ async function requestWithDeleteFallback(path, fallbackPath) {
   }
 }
 
+async function requestWithUpdateFallback(path, fallbackPath, payload) {
+  const body = JSON.stringify(payload)
+  try {
+    return await request(fallbackPath, { method: 'POST', body })
+  } catch (error) {
+    if (!isRetryableDeleteFallbackError(error)) throw error
+    return request(path, { method: 'PUT', body })
+  }
+}
+
 export function fetchDatabase(options = {}) {
   const params = new URLSearchParams()
   if (options.mcqMode) {
@@ -93,10 +103,12 @@ export function createVocabulary(payload) {
 }
 
 export function updateVocabulary(id, payload) {
-  return request(`/api/vocabulary/${encodeURIComponent(String(id))}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  })
+  const safeId = encodeURIComponent(String(id))
+  return requestWithUpdateFallback(
+    `/api/vocabulary/${safeId}`,
+    `/api/vocabulary/${safeId}/update`,
+    payload,
+  )
 }
 
 export function updateVocabularyProgress(id, correct) {
@@ -122,10 +134,13 @@ export function createQuestion(payload) {
 }
 
 export function updateQuestion(type, id, payload) {
-  return request(`/api/questions/${encodeURIComponent(String(type))}/${encodeURIComponent(String(id))}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  })
+  const safeType = encodeURIComponent(String(type))
+  const safeId = encodeURIComponent(String(id))
+  return requestWithUpdateFallback(
+    `/api/questions/${safeType}/${safeId}`,
+    `/api/questions/${safeType}/${safeId}/update`,
+    payload,
+  )
 }
 
 export function deleteQuestion(type, id) {

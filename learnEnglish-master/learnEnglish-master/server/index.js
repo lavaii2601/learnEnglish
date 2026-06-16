@@ -78,6 +78,18 @@ app.use((req, _, next) => {
   next()
 })
 
+app.use((req, _, next) => {
+  if (req.method === 'POST') {
+    const currentUrl = normalizePathFromRequestUrl(req.url)
+    const [pathname, search = ''] = currentUrl.split('?')
+    if (pathname.endsWith('/update')) {
+      req.method = 'PUT'
+      req.url = `${pathname.slice(0, -'/update'.length)}${search ? `?${search}` : ''}`
+    }
+  }
+  next()
+})
+
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseWriteKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
 const supabaseReadKey = process.env.SUPABASE_PUBLISHABLE_KEY
