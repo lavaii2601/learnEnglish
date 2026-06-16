@@ -46,13 +46,18 @@ async function request(path, options = {}) {
   return response.json()
 }
 
+function isRetryableDeleteFallbackError(error) {
+  const message = String(error?.message || '')
+  return /HTTP\s+(403|404|405|501)/i.test(message)
+    || /Unexpected token|JSON|Failed to fetch|NetworkError/i.test(message)
+}
+
 async function requestWithDeleteFallback(path, fallbackPath) {
   try {
-    return await request(path, { method: 'DELETE' })
+    return await request(fallbackPath, { method: 'POST' })
   } catch (error) {
-    const is404 = /HTTP\s+404/i.test(String(error?.message || ''))
-    if (!is404) throw error
-    return request(fallbackPath, { method: 'POST' })
+    if (!isRetryableDeleteFallbackError(error)) throw error
+    return request(path, { method: 'DELETE' })
   }
 }
 

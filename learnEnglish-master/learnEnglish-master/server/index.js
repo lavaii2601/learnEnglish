@@ -355,6 +355,24 @@ function assertNoSupabaseError(error, fallbackMessage) {
   throw new Error(error.message || fallbackMessage)
 }
 
+async function deleteRowById(table, id, fallbackMessage) {
+  const deleteQuery = supabase
+    .from(table)
+    .delete()
+    .eq('id', id)
+  const { data, error } = typeof deleteQuery.select === 'function'
+    ? await deleteQuery.select('id')
+    : await deleteQuery
+
+  assertNoSupabaseError(error, fallbackMessage)
+
+  if (Array.isArray(data) && data.length === 0) {
+    throw new Error(`${fallbackMessage}. Không tìm thấy dữ liệu hoặc khóa Supabase không có quyền xóa.`)
+  }
+
+  clearDatabaseResponseCache()
+}
+
 const WORD_TYPES = ['noun', 'verb', 'adjective', 'other']
 
 function toWordType(value) {
@@ -774,9 +792,7 @@ app.delete('/api/vocabulary/:id', async (req, res, next) => {
     const id = Number(req.params.id)
     if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
 
-    const { error } = await supabase.from('vocabulary').delete().eq('id', id)
-    assertNoSupabaseError(error, 'Không thể xóa từ vựng')
-    clearDatabaseResponseCache()
+    await deleteRowById('vocabulary', id, 'Không thể xóa từ vựng')
 
     return res.json({ ok: true })
   } catch (error) {
@@ -789,9 +805,7 @@ app.post('/api/vocabulary/:id/delete', async (req, res, next) => {
     const id = Number(req.params.id)
     if (!id) return res.status(400).json({ message: 'ID không hợp lệ' })
 
-    const { error } = await supabase.from('vocabulary').delete().eq('id', id)
-    assertNoSupabaseError(error, 'Không thể xóa từ vựng')
-    clearDatabaseResponseCache()
+    await deleteRowById('vocabulary', id, 'Không thể xóa từ vựng')
 
     return res.json({ ok: true })
   } catch (error) {
@@ -1056,39 +1070,27 @@ app.delete('/api/questions/:type/:id', async (req, res, next) => {
     if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
 
     if (type === 'mcq') {
-      const { error } = await supabase.from('mcq_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi trắc nghiệm')
-      clearDatabaseResponseCache()
+      await deleteRowById('mcq_questions', id, 'Không thể xóa câu hỏi trắc nghiệm')
     }
 
     if (type === 'matching') {
-      const { error } = await supabase.from('matching_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi nối từ')
-      clearDatabaseResponseCache()
+      await deleteRowById('matching_questions', id, 'Không thể xóa câu hỏi nối từ')
     }
 
     if (type === 'fillBlank') {
-      const { error } = await supabase.from('fill_blank_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi điền chỗ trống')
-      clearDatabaseResponseCache()
+      await deleteRowById('fill_blank_questions', id, 'Không thể xóa câu hỏi điền chỗ trống')
     }
 
     if (type === 'writing') {
-      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
-      clearDatabaseResponseCache()
+      await deleteRowById('writing_questions', id, 'Không thể xóa câu hỏi viết')
     }
 
     if (type === 'listing') {
-      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
-      clearDatabaseResponseCache()
+      await deleteRowById('writing_questions', id, 'Không thể xóa câu hỏi liệt kê')
     }
 
     if (type === 'arrange') {
-      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi sắp xếp')
-      clearDatabaseResponseCache()
+      await deleteRowById('writing_questions', id, 'Không thể xóa câu hỏi sắp xếp')
     }
 
     return res.json({ ok: true })
@@ -1105,39 +1107,27 @@ app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
     if (!type || !id) return res.status(400).json({ message: 'Tham số không hợp lệ' })
 
     if (type === 'mcq') {
-      const { error } = await supabase.from('mcq_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi trắc nghiệm')
-      clearDatabaseResponseCache()
+      await deleteRowById('mcq_questions', id, 'Không thể xóa câu hỏi trắc nghiệm')
     }
 
     if (type === 'matching') {
-      const { error } = await supabase.from('matching_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi nối từ')
-      clearDatabaseResponseCache()
+      await deleteRowById('matching_questions', id, 'Không thể xóa câu hỏi nối từ')
     }
 
     if (type === 'fillBlank') {
-      const { error } = await supabase.from('fill_blank_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi điền chỗ trống')
-      clearDatabaseResponseCache()
+      await deleteRowById('fill_blank_questions', id, 'Không thể xóa câu hỏi điền chỗ trống')
     }
 
     if (type === 'writing') {
-      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi viết')
-      clearDatabaseResponseCache()
+      await deleteRowById('writing_questions', id, 'Không thể xóa câu hỏi viết')
     }
 
     if (type === 'listing') {
-      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi liệt kê')
-      clearDatabaseResponseCache()
+      await deleteRowById('writing_questions', id, 'Không thể xóa câu hỏi liệt kê')
     }
 
     if (type === 'arrange') {
-      const { error } = await supabase.from('writing_questions').delete().eq('id', id)
-      assertNoSupabaseError(error, 'Không thể xóa câu hỏi sắp xếp')
-      clearDatabaseResponseCache()
+      await deleteRowById('writing_questions', id, 'Không thể xóa câu hỏi sắp xếp')
     }
 
     return res.json({ ok: true })

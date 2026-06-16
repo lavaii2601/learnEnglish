@@ -2776,7 +2776,6 @@ function attachExerciseEvents() {
       const index = Number(target.dataset.writingIndex)
       if (state.writingAnswers[index] !== target.value) {
         state.writingAnswers[index] = target.value
-        render()
       }
       return
     }
@@ -2785,7 +2784,6 @@ function attachExerciseEvents() {
       const index = Number(target.dataset.listingIndex)
       if (state.listingAnswers[index] !== target.value) {
         state.listingAnswers[index] = target.value
-        render()
       }
     }
   })
@@ -3476,7 +3474,6 @@ function attachExerciseEvents() {
       const rightId = Number(button.dataset.matchRight)
       const selectedLeftId = Number(state.matchingSelectedLeftId)
       if (!rightId || !selectedLeftId) return
-      const hadPreviousLink = Number(state.matchingPairs[selectedLeftId]) > 0
 
       Object.entries(state.matchingPairs).forEach(([leftId, linkedRightId]) => {
         if (Number(leftId) !== selectedLeftId && Number(linkedRightId) === rightId) {
@@ -3486,13 +3483,7 @@ function attachExerciseEvents() {
 
       state.matchingPairs[selectedLeftId] = rightId
       state.matchingChecked = false
-
-      if (!hadPreviousLink) {
-        const nextUnmatchedLeftId = state.matchingSessionIds
-          .map((id) => Number(id))
-          .find((leftId) => !Number(state.matchingPairs[leftId]))
-        state.matchingSelectedLeftId = nextUnmatchedLeftId || selectedLeftId
-      }
+      state.matchingSelectedLeftId = selectedLeftId
 
       render()
       return
