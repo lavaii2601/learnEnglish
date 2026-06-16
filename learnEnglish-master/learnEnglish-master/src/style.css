@@ -874,6 +874,28 @@ p {
   font-size: 0.98rem;
 }
 
+.writing-answer-reveal {
+  border: 1px solid #67e8f9;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #ecfeff, #eff6ff);
+  display: grid;
+  gap: 4px;
+  color: #155e75;
+}
+
+.writing-answer-reveal span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.writing-answer-reveal strong {
+  font-size: 0.98rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .arrange-drop-zone {
   min-height: 58px;
   border: 2px dashed #818cf8;
@@ -1297,6 +1319,36 @@ textarea {
   border-color: #ef4444;
   background: linear-gradient(135deg, #fee2e2, #fff1f2);
   color: #991b1b;
+}
+
+.matching-answer-reveal {
+  border: 1px solid #67e8f9;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #ecfeff, #eff6ff);
+  display: grid;
+  gap: 8px;
+  color: #155e75;
+}
+
+.matching-answer-reveal > span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.matching-answer-reveal p {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.42fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border-top: 1px solid rgba(103, 232, 249, 0.72);
+  padding-top: 8px;
+}
+
+.matching-answer-reveal strong,
+.matching-answer-reveal p span {
+  overflow-wrap: anywhere;
 }
 
 .listing-review-block {
