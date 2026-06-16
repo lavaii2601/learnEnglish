@@ -480,7 +480,8 @@ async function deleteRowById(table, id, fallbackMessage) {
   assertNoSupabaseError(error, fallbackMessage)
 
   if (Array.isArray(data) && data.length === 0) {
-    throw new Error(`${fallbackMessage}. Không tìm thấy dữ liệu hoặc khóa Supabase không có quyền xóa.`)
+    clearDatabaseResponseCache()
+    return
   }
 
   clearDatabaseResponseCache()

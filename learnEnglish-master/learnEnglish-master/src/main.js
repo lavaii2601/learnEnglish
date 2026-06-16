@@ -1464,7 +1464,7 @@ function renderLandingPage() {
       <section class="landing-card">
         <img
           class="brand-logo landing-logo"
-          src="/logo.jpg"
+          src="/favicon.svg"
           alt="Logo Học tiếng Anh cùng Hồng Nga"
           onerror="this.style.display='none'"
         />
