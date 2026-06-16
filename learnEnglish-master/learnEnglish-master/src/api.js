@@ -58,53 +58,11 @@ async function request(path, options = {}) {
   return response.json()
 }
 
-function isRetryableDeleteFallbackError(error) {
-  const message = String(error?.message || '')
-  return /HTTP\s+(403|404|405|501)/i.test(message)
-    || /Unexpected token|JSON|Failed to fetch|NetworkError/i.test(message)
-}
-
-async function requestWithDeleteFallback(path, fallbackPath) {
-  try {
-    return await request(fallbackPath, { method: 'POST' })
-  } catch (error) {
-    if (!isRetryableDeleteFallbackError(error)) throw error
-    return request(path, { method: 'DELETE' })
-  }
-}
-
-async function requestWithFlatDeleteFallback(path, fallbackPath, flatPath, payload) {
-  try {
-    return await request(flatPath, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
-  } catch (error) {
-    if (!isRetryableDeleteFallbackError(error)) throw error
-    return requestWithDeleteFallback(path, fallbackPath)
-  }
-}
-
-async function requestWithUpdateFallback(path, fallbackPath, payload) {
-  const body = JSON.stringify(payload)
-  try {
-    return await request(fallbackPath, { method: 'POST', body })
-  } catch (error) {
-    if (!isRetryableDeleteFallbackError(error)) throw error
-    return request(path, { method: 'PUT', body })
-  }
-}
-
-async function requestWithFlatUpdateFallback(path, fallbackPath, flatPath, payload) {
-  try {
-    return await request(flatPath, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
-  } catch (error) {
-    if (!isRetryableDeleteFallbackError(error)) throw error
-    return requestWithUpdateFallback(path, fallbackPath, payload.payload || payload)
-  }
+async function requestFlatWrite(path, payload) {
+  return request(path, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function fetchDatabase(options = {}) {
@@ -127,13 +85,7 @@ export function createVocabulary(payload) {
 }
 
 export function updateVocabulary(id, payload) {
-  const safeId = encodeURIComponent(String(id))
-  return requestWithFlatUpdateFallback(
-    `/api/vocabulary/${safeId}`,
-    `/api/vocabulary/${safeId}/update`,
-    '/api/vocabulary-update',
-    { id, payload },
-  )
+  return requestFlatWrite('/api/vocabulary-update', { id, payload })
 }
 
 export function updateVocabularyProgress(id, correct) {
@@ -144,13 +96,7 @@ export function updateVocabularyProgress(id, correct) {
 }
 
 export function deleteVocabulary(id) {
-  const safeId = encodeURIComponent(String(id))
-  return requestWithFlatDeleteFallback(
-    `/api/vocabulary/${safeId}`,
-    `/api/vocabulary/${safeId}/delete`,
-    '/api/vocabulary-delete',
-    { id },
-  )
+  return requestFlatWrite('/api/vocabulary-delete', { id })
 }
 
 export function createQuestion(payload) {
@@ -161,23 +107,9 @@ export function createQuestion(payload) {
 }
 
 export function updateQuestion(type, id, payload) {
-  const safeType = encodeURIComponent(String(type))
-  const safeId = encodeURIComponent(String(id))
-  return requestWithFlatUpdateFallback(
-    `/api/questions/${safeType}/${safeId}`,
-    `/api/questions/${safeType}/${safeId}/update`,
-    '/api/question-update',
-    { type, id, payload },
-  )
+  return requestFlatWrite('/api/question-update', { type, id, payload })
 }
 
 export function deleteQuestion(type, id) {
-  const safeType = encodeURIComponent(String(type))
-  const safeId = encodeURIComponent(String(id))
-  return requestWithFlatDeleteFallback(
-    `/api/questions/${safeType}/${safeId}`,
-    `/api/questions/${safeType}/${safeId}/delete`,
-    '/api/question-delete',
-    { type, id },
-  )
+  return requestFlatWrite('/api/question-delete', { type, id })
 }
