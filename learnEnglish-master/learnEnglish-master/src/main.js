@@ -122,6 +122,8 @@ let renderScheduled = false
 let exerciseEventsBound = false
 let matchingLinesRenderScheduled = false
 let lastRenderedMarkup = ''
+let routeLoadToken = 0
+const databaseRequestMap = new Map()
 
 function isSourceRoute(route) {
   return route.startsWith('/source/')
@@ -190,8 +192,7 @@ function getCachedDatabaseEntry() {
   return state.databaseCache[key]
 }
 
-function saveDatabaseCache(payload) {
-  const key = getDatabaseCacheKey()
+function saveDatabaseCache(payload, key = getDatabaseCacheKey()) {
   const timestamp = Date.now()
   // payload comes fresh from the API response and is never mutated in place,
   // so the in-memory and persistent caches can safely share the same object;
@@ -1473,6 +1474,7 @@ function renderLandingPage() {
 
 async function refreshDatabase(options = {}) {
   const { force = false } = options
+  const cacheKey = getDatabaseCacheKey()
 
   if (!force) {
     const cached = getCachedDatabaseEntry()
@@ -1482,21 +1484,32 @@ async function refreshDatabase(options = {}) {
     }
   }
 
-  let payload
-  if (state.route === '/exercise/mcq') {
-    payload = await fetchDatabase({
-      mcqMode: state.mcqSourceMode,
-      fresh: force,
-    })
-  } else {
-    payload = await fetchDatabase({ fresh: force })
+  const requestKey = `${cacheKey}:${force ? 'fresh' : 'cached'}`
+  if (!databaseRequestMap.has(requestKey)) {
+    const request = (state.route === '/exercise/mcq'
+      ? fetchDatabase({
+        mcqMode: state.mcqSourceMode,
+        fresh: force,
+      })
+      : fetchDatabase({ fresh: force }))
+      .finally(() => {
+        databaseRequestMap.delete(requestKey)
+      })
+
+    databaseRequestMap.set(requestKey, request)
   }
 
-  state.database = payload
-  saveDatabaseCache(payload)
+  const payload = await databaseRequestMap.get(requestKey)
+  if (getDatabaseCacheKey() === cacheKey) {
+    state.database = payload
+  }
+  saveDatabaseCache(payload, cacheKey)
 }
 
 async function loadDataForCurrentRoute() {
+  const loadToken = routeLoadToken + 1
+  routeLoadToken = loadToken
+
   if (state.route === '/welcome') {
     state.loading = false
     state.serverError = ''
@@ -1509,29 +1522,32 @@ async function loadDataForCurrentRoute() {
   const hasFreshCache = Boolean(cached)
   if (cached) {
     state.database = cloneDatabasePayload(cached.data)
+    resetExerciseState()
   }
 
   state.loading = !hasFreshCache
   state.serverError = ''
   render()
 
-  try {
-    await refreshDatabase({ force: true })
-    resetExerciseState()
-  } catch (error) {
-    if (!hasFreshCache) {
+  if (!hasFreshCache) {
+    try {
+      await refreshDatabase({ force: false })
+      if (loadToken !== routeLoadToken) return
+      resetExerciseState()
+    } catch (error) {
+      if (loadToken !== routeLoadToken) return
       state.serverError = error.message || 'Không truy vấn được dữ liệu từ cơ sở dữ liệu.'
     }
   }
 
+  if (loadToken !== routeLoadToken) return
   state.loading = false
   render()
 }
 
 async function preloadDatabase() {
   try {
-    const payload = await fetchDatabase({ fresh: true })
-    saveDatabaseCache(payload)
+    await refreshDatabase({ force: false })
   } catch {
     // The route loader will display an error if the user opens a data page.
   }

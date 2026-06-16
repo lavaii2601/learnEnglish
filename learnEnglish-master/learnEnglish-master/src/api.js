@@ -4,6 +4,7 @@ const API_BASE = import.meta.env.VITE_API_URL
     : '')
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
+const REQUEST_TIMEOUT_MS = 12_000
 
 function wait(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
@@ -14,18 +15,29 @@ async function request(path, options = {}) {
   let response
 
   for (let attempt = 0; attempt <= retry; attempt += 1) {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
     try {
       response = await fetch(`${API_BASE}${path}`, {
         headers: {
           'Content-Type': 'application/json',
           ...(fetchOptions.headers || {}),
         },
+        signal: controller.signal,
         ...fetchOptions,
       })
     } catch (error) {
+      window.clearTimeout(timeoutId)
+      if (error?.name === 'AbortError') {
+        if (attempt >= retry) throw new Error('Kết nối máy chủ quá lâu, vui lòng thử lại.')
+        await wait(500 * (attempt + 1))
+        continue
+      }
       if (attempt >= retry) throw error
       await wait(500 * (attempt + 1))
       continue
+    } finally {
+      window.clearTimeout(timeoutId)
     }
 
     if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt >= retry) break
