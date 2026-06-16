@@ -78,10 +78,18 @@ app.use((req, _, next) => {
   next()
 })
 
-const supabaseUrl = process.env.SUPABASE_URL
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseWriteKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+const supabaseReadKey = process.env.SUPABASE_PUBLISHABLE_KEY
+  || process.env.SUPABASE_ANON_KEY
+  || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+const hasSecretKey = Boolean(process.env.SUPABASE_SECRET_KEY)
 const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)
-const hasAnonKey = Boolean(process.env.SUPABASE_ANON_KEY)
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+const hasServerWriteKey = Boolean(supabaseWriteKey)
+const hasAnonKey = Boolean(process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+const hasPublishableKey = Boolean(process.env.SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
+const supabaseKey = supabaseWriteKey || supabaseReadKey
 const shouldSeedSampleData = process.env.ENABLE_SAMPLE_SEED === 'true'
 let supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey, {
@@ -200,13 +208,13 @@ function clearDatabaseResponseCache() {
 
 function assertSupabaseConfigured() {
   if (supabase) return
-  throw new Error('Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY trong biến môi trường.')
+  throw new Error('Thiếu SUPABASE_URL hoặc Supabase API key trong biến môi trường Vercel.')
 }
 
 function assertSupabaseWriteConfigured() {
   assertSupabaseConfigured()
-  if (hasServiceRoleKey || process.env.FORCE_LOCAL_MOCK === 'true' || process.env.NODE_ENV === 'development') return
-  throw new Error('Server deploy chưa có SUPABASE_SERVICE_ROLE_KEY. Các thao tác thêm/sửa/xóa trên Supabase cần service role key trong Vercel Environment Variables.')
+  if (hasServerWriteKey || process.env.FORCE_LOCAL_MOCK === 'true' || process.env.NODE_ENV === 'development') return
+  throw new Error('Server deploy chưa có SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY. Các thao tác thêm/sửa/xóa trên Supabase cần secret/server key từ Vercel Supabase Integration.')
 }
 
 function toQuestionType(type) {
@@ -733,9 +741,12 @@ app.get('/api/health', (_, res) => {
   res.json({
     ok: true,
     supabaseConfigured: Boolean(supabaseUrl && supabaseKey),
+    hasSecretKey,
     hasServiceRoleKey,
+    hasServerWriteKey,
     hasAnonKey,
-    writeReady: Boolean(supabaseUrl && hasServiceRoleKey),
+    hasPublishableKey,
+    writeReady: Boolean(supabaseUrl && hasServerWriteKey),
     nodeEnv: process.env.NODE_ENV || '',
   })
 })
