@@ -60,6 +60,22 @@ function normalizeOrigin(origin) {
   }
 }
 
+function getOriginHost(origin) {
+  if (!origin) return ''
+  try {
+    return new URL(origin).host
+  } catch {
+    return ''
+  }
+}
+
+function getRequestHost(req) {
+  return String(req.headers['x-forwarded-host'] || req.headers.host || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase()
+}
+
 function getAllowedOrigins() {
   const configuredOrigins = String(process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || '')
     .split(',')
@@ -88,6 +104,17 @@ function getAllowedOrigins() {
 
 const allowedOrigins = getAllowedOrigins()
 
+function isAllowedRequestOrigin(req, origin) {
+  if (!origin) return false
+
+  const normalizedOrigin = normalizeOrigin(origin)
+  if (allowedOrigins.has(normalizedOrigin)) return true
+
+  const originHost = getOriginHost(normalizedOrigin).toLowerCase()
+  const requestHost = getRequestHost(req)
+  return Boolean(originHost && requestHost && originHost === requestHost)
+}
+
 app.use((_, res, next) => {
   res.set({
     'X-Content-Type-Options': 'nosniff',
@@ -100,17 +127,18 @@ app.use((_, res, next) => {
   next()
 })
 
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin) return callback(null, false)
-    const normalizedOrigin = normalizeOrigin(origin)
-    if (allowedOrigins.has(normalizedOrigin)) return callback(null, true)
-    return callback(new Error('Origin không được phép truy cập API.'))
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  credentials: false,
-  maxAge: 86400,
+app.use(cors((req, callback) => {
+  callback(null, {
+    origin(origin, originCallback) {
+      if (!origin) return originCallback(null, false)
+      if (isAllowedRequestOrigin(req, origin)) return originCallback(null, true)
+      return originCallback(new Error('Origin không được phép truy cập API.'))
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
+    credentials: false,
+    maxAge: 86400,
+  })
 }))
 app.use(express.json())
 
