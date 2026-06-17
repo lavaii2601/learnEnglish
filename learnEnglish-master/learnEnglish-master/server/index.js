@@ -120,12 +120,20 @@ function getAllowedOrigins() {
 }
 
 const allowedOrigins = getAllowedOrigins()
+const hasExplicitAllowedOrigins = Boolean(process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL)
 
 function isAllowedRequestOrigin(req, origin) {
   if (!origin) return false
 
   const normalizedOrigin = normalizeOrigin(origin)
   if (allowedOrigins.has(normalizedOrigin)) return true
+
+  // On Vercel/custom-domain deploys, the browser origin and serverless host can
+  // differ even for the same app. If the owner has not configured
+  // ALLOWED_ORIGINS yet, avoid breaking writes; CORS is not used for auth here.
+  if (isProduction && !hasExplicitAllowedOrigins && normalizedOrigin.startsWith('https://')) {
+    return true
+  }
 
   const originHost = getOriginHost(normalizedOrigin).toLowerCase()
   const requestHost = getRequestHost(req)
