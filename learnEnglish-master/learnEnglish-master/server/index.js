@@ -47,8 +47,71 @@ loadEnvFileIfPresent()
 
 const app = express()
 const PORT = Number(process.env.PORT || 3001)
+const isProduction = process.env.NODE_ENV === 'production'
 
-app.use(cors())
+app.disable('x-powered-by')
+
+function normalizeOrigin(origin) {
+  if (!origin) return ''
+  try {
+    return new URL(origin).origin
+  } catch {
+    return ''
+  }
+}
+
+function getAllowedOrigins() {
+  const configuredOrigins = String(process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((origin) => normalizeOrigin(origin.trim()))
+    .filter(Boolean)
+
+  const vercelUrl = process.env.VERCEL_URL
+    ? normalizeOrigin(`https://${process.env.VERCEL_URL}`)
+    : ''
+
+  const localOrigins = isProduction
+    ? []
+    : [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:4173',
+      'http://127.0.0.1:4173',
+    ]
+
+  return new Set([
+    ...configuredOrigins,
+    vercelUrl,
+    ...localOrigins,
+  ].filter(Boolean))
+}
+
+const allowedOrigins = getAllowedOrigins()
+
+app.use((_, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  })
+  next()
+})
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) return callback(null, false)
+    const normalizedOrigin = normalizeOrigin(origin)
+    if (allowedOrigins.has(normalizedOrigin)) return callback(null, true)
+    return callback(new Error('Origin không được phép truy cập API.'))
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false,
+  maxAge: 86400,
+}))
 app.use(express.json())
 
 function normalizePathFromRequestUrl(rawUrl) {
@@ -232,7 +295,7 @@ if (!supabase && (process.env.NODE_ENV === 'development' || process.env.FORCE_LO
 }
 
 let initPromise
-const DATABASE_RESPONSE_CACHE_TTL_MS = 15_000
+const DATABASE_RESPONSE_CACHE_TTL_MS = 60_000
 const databaseResponseCache = new Map()
 
 function getDatabaseResponseCache(cacheKey) {
@@ -350,8 +413,8 @@ function normalizeForCompare(text) {
   return String(text || '').trim().toLowerCase()
 }
 
-function answerProfile(answer) {
-  const value = normalizeForCompare(answer)
+function answerProfile(answer, normalizedAnswer = normalizeForCompare(answer)) {
+  const value = normalizedAnswer
   const words = value.split(/\s+/).filter(Boolean)
   return {
     text: value,
@@ -363,16 +426,16 @@ function answerProfile(answer) {
   }
 }
 
-function answersShareShape(targetAnswer, candidateAnswer) {
-  const target = answerProfile(targetAnswer)
-  const candidate = answerProfile(candidateAnswer)
+function answersShareShape(targetProfile, candidateProfile) {
+  const target = typeof targetProfile === 'object' ? targetProfile : answerProfile(targetProfile)
+  const candidate = typeof candidateProfile === 'object' ? candidateProfile : answerProfile(candidateProfile)
 
   return target.isSingleWord === candidate.isSingleWord
     && target.isSentenceLike === candidate.isSentenceLike
 }
 
-function questionHints(question) {
-  const text = normalizeForCompare(question)
+function questionHints(question, normalizedQuestion = normalizeForCompare(question)) {
+  const text = normalizedQuestion
   return {
     isVocabularyDefinition: text.includes('nghĩa của từ') || text.includes('nghia cua tu') || text.includes('meaning of the word'),
     wantsGrammar: text.includes('ngữ pháp') || text.includes('grammar'),
@@ -380,27 +443,26 @@ function questionHints(question) {
   }
 }
 
-function questionFamily(question, answer) {
-  const hints = questionHints(question)
-  const answerShape = answerProfile(answer)
+function questionFamily(question, answer, hints = questionHints(question), answerShape = answerProfile(answer)) {
+  const questionHintData = hints
 
-  if (hints.isVocabularyDefinition) return 'vocabulary_definition'
-  if (hints.wantsGrammar) return 'grammar_sentence'
-  if (hints.wantsSynonym) return 'synonym_word'
+  if (questionHintData.isVocabularyDefinition) return 'vocabulary_definition'
+  if (questionHintData.wantsGrammar) return 'grammar_sentence'
+  if (questionHintData.wantsSynonym) return 'synonym_word'
   if (answerShape.isSentenceLike) return 'sentence_like'
   if (answerShape.isSingleWord) return 'single_word'
   return 'general'
 }
 
-function sharesQuestionFamily(targetQuestion, targetAnswer, candidateQuestion, candidateAnswer) {
-  return questionFamily(targetQuestion, targetAnswer) === questionFamily(candidateQuestion, candidateAnswer)
+function sharesQuestionFamily(targetFamily, candidateFamily) {
+  return targetFamily === candidateFamily
 }
 
-function distractorScore(targetAnswer, targetQuestion, candidateAnswer, candidateQuestion) {
-  const target = answerProfile(targetAnswer)
-  const candidate = answerProfile(candidateAnswer)
-  const targetHints = questionHints(targetQuestion)
-  const candidateHints = questionHints(candidateQuestion)
+function distractorScore(targetMeta, candidateMeta) {
+  const target = targetMeta.profile
+  const candidate = candidateMeta.profile
+  const targetHints = targetMeta.hints
+  const candidateHints = candidateMeta.hints
 
   let score = 0
 
@@ -424,29 +486,67 @@ function distractorScore(targetAnswer, targetQuestion, candidateAnswer, candidat
   return score
 }
 
-function createMcqOptions(currentAnswer, allAnswerRows, currentQuestion) {
-  const currentNormalized = normalizeForCompare(currentAnswer)
+function createAnswerMeta(row) {
+  const answer = String(row.answer || '').trim()
+  const question = String(row.question || '').trim()
+  const normalizedAnswer = normalizeForCompare(answer)
+  const normalizedQuestion = normalizeForCompare(question)
+  const profile = answerProfile(answer, normalizedAnswer)
+  const hints = questionHints(question, normalizedQuestion)
 
-  const uniqueCandidates = [...new Map(
-    allAnswerRows
-      .filter((row) => normalizeForCompare(row.answer) !== currentNormalized)
-      .map((row) => [normalizeForCompare(row.answer), row]),
-  ).values()]
+  return {
+    answer,
+    question,
+    normalizedAnswer,
+    normalizedQuestion,
+    profile,
+    hints,
+    family: questionFamily(question, answer, hints, profile),
+  }
+}
 
-  const sameFamilyCandidates = uniqueCandidates.filter((row) => sharesQuestionFamily(
-    currentQuestion,
-    currentAnswer,
-    row.question,
-    row.answer,
-  ))
-  const sameShapeCandidates = uniqueCandidates.filter((row) => answersShareShape(currentAnswer, row.answer))
-  const candidatePool = [...sameFamilyCandidates, ...sameShapeCandidates, ...uniqueCandidates]
-    .filter((row, index, items) => index === items.findIndex((candidate) => normalizeForCompare(candidate.answer) === normalizeForCompare(row.answer)))
+function createAnswerCandidateIndex(answerRows) {
+  const byAnswer = new Map()
+  answerRows.forEach((row) => {
+    const meta = createAnswerMeta(row)
+    if (meta.answer && !byAnswer.has(meta.normalizedAnswer)) {
+      byAnswer.set(meta.normalizedAnswer, meta)
+    }
+  })
+
+  return [...byAnswer.values()]
+}
+
+function createMcqOptions(currentAnswer, answerCandidates, currentQuestion) {
+  const targetMeta = createAnswerMeta({
+    answer: currentAnswer,
+    question: currentQuestion,
+  })
+
+  const matchingCandidates = []
+  const fallbackCandidates = []
+  answerCandidates.forEach((candidate) => {
+    if (candidate.normalizedAnswer === targetMeta.normalizedAnswer) return
+    if (
+      sharesQuestionFamily(targetMeta.family, candidate.family)
+      || answersShareShape(targetMeta.profile, candidate.profile)
+    ) {
+      matchingCandidates.push(candidate)
+      return
+    }
+    if (fallbackCandidates.length < 48) {
+      fallbackCandidates.push(candidate)
+    }
+  })
+
+  const candidatePool = matchingCandidates.length >= 3
+    ? matchingCandidates
+    : [...matchingCandidates, ...fallbackCandidates]
 
   const scoredCandidates = candidatePool
-    .map((row) => ({
-      answer: row.answer,
-      score: distractorScore(currentAnswer, currentQuestion, row.answer, row.question),
+    .map((candidate) => ({
+      answer: candidate.answer,
+      score: distractorScore(targetMeta, candidate),
     }))
     .sort((left, right) => right.score - left.score)
 
@@ -505,7 +605,7 @@ async function fetchVocabularyRows() {
 async function fetchMcqRows() {
   const { data, error } = await supabase
     .from('mcq_questions')
-    .select('id, question, option_a, option_b, option_c, option_d, mode, answer')
+    .select('id, question, mode, answer')
     .order('id', { ascending: false })
   assertNoSupabaseError(error, 'Không thể tải câu hỏi trắc nghiệm')
   return data || []
@@ -731,8 +831,8 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
 
   const shuffledMcqExerciseRows = shuffleList(mcqExerciseRows)
 
-  const vocabularyExerciseAnswerRows = vocabularyAnswerRows
-  const questionExerciseAnswerRows = questionMcqAnswerRows
+  const vocabularyExerciseAnswerRows = createAnswerCandidateIndex(vocabularyAnswerRows)
+  const questionExerciseAnswerRows = createAnswerCandidateIndex(questionMcqAnswerRows)
 
   // Computed once per mcq_questions row and reused for mcqExercise entries with
   // source === 'question', since both use identical inputs (createMcqOptions
@@ -794,6 +894,11 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
 }
 
 app.get('/api/health', (_, res) => {
+  res.set('Cache-Control', 'no-store')
+  if (isProduction) {
+    return res.json({ ok: true })
+  }
+
   res.json({
     ok: true,
     supabaseConfigured: Boolean(supabaseUrl && supabaseKey),
@@ -1290,18 +1395,33 @@ app.post('/api/questions/:type/:id/delete', async (req, res, next) => {
 
 app.use((req, res) => {
   res.status(404).json({
-    message: `Không tìm thấy endpoint API: ${req.method} ${req.originalUrl}`,
+    message: 'Không tìm thấy endpoint API.',
   })
 })
 
 app.use((error, _, res, __) => {
-  console.error(error)
   const message = String(error?.message || '')
+
+  if (isProduction) {
+    console.error('[api-error]', message || 'Internal server error')
+  } else {
+    console.error(error)
+  }
+
+  if (message.includes('Origin không được phép')) {
+    return res.status(403).json({ message: 'Origin không được phép truy cập API.' })
+  }
+
   if (message.includes('relation') || message.includes('does not exist')) {
     return res.status(500).json({
       message: 'Chưa có bảng Supabase. Hãy chạy SQL trong file supabase/schema.sql trước.',
     })
   }
+
+  if (isProduction) {
+    return res.status(500).json({ message: 'Lỗi máy chủ nội bộ.' })
+  }
+
   return res.status(500).json({ message: message || 'Lỗi máy chủ nội bộ' })
 })
 

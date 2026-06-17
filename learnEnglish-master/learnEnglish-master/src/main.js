@@ -130,7 +130,7 @@ function isSourceRoute(route) {
 }
 
 function cloneDatabasePayload(payload) {
-  return structuredClone(payload)
+  return payload
 }
 
 function getDatabaseCacheKey() {
@@ -271,8 +271,7 @@ function buildSessionIndexes(totalQuestions, selectedCount, maxCount) {
 
   const maxAllowed = Math.min(maxCount, cappedTotal)
   const count = Math.min(maxAllowed, Math.max(1, selectedCount || 1))
-  const allIndexes = Array.from({ length: cappedTotal }, (_, index) => index)
-  return getShuffledItems(allIndexes).slice(0, count)
+  return getRandomIndexes(cappedTotal, count)
 }
 
 function clampQuestionCount(value, totalQuestions) {
@@ -553,6 +552,29 @@ function getShuffledItems(items) {
   return list
 }
 
+function getRandomIndexes(total, count) {
+  const cappedTotal = Math.max(0, Number(total) || 0)
+  const cappedCount = Math.min(cappedTotal, Math.max(0, Number(count) || 0))
+  const indexSwaps = new Map()
+  const picked = []
+
+  for (let index = 0; index < cappedCount; index += 1) {
+    const swapIndex = index + Math.floor(Math.random() * (cappedTotal - index))
+    const pickedIndex = indexSwaps.get(swapIndex) ?? swapIndex
+    const currentIndex = indexSwaps.get(index) ?? index
+    indexSwaps.set(swapIndex, currentIndex)
+    picked.push(pickedIndex)
+  }
+
+  return picked
+}
+
+function getRandomItems(items, count) {
+  const list = Array.isArray(items) ? items : []
+  const indexes = getRandomIndexes(list.length, count)
+  return indexes.map((index) => list[index])
+}
+
 function buildListingSessionIndexes(totalQuestions) {
   return buildSessionIndexes(totalQuestions, state.listingQuestionCount, totalQuestions)
 }
@@ -569,11 +591,12 @@ function resetListingSession(totalQuestions) {
 }
 
 function gradeListingSession() {
+  const sessionIndexSet = new Set(state.listingSessionIndexes)
   state.listingSessionIndexes.forEach((index) => {
     state.listingCheckedMap[index] = true
   })
   state.listingShowAnswerMap = state.listingShowAnswerMap.map((value, index) => (
-    state.listingSessionIndexes.includes(index) ? true : value
+    sessionIndexSet.has(index) ? true : value
   ))
   state.listingScoreDirty = true
   state.listingSessionPhase = 'completed'
@@ -593,8 +616,8 @@ function resetMatchingSession(totalQuestions = (state.database.questions.matchin
   }
 
   const selectedCount = clampQuestionCount(state.matchingQuestionCount, cappedTotal)
-  const allIds = getShuffledItems(Array.from({ length: cappedTotal }, (_, index) => state.database.questions.matching[index].id))
-  const selectedIds = allIds.slice(0, selectedCount)
+  const selectedIds = getRandomItems(state.database.questions.matching, selectedCount)
+    .map((item) => item.id)
 
   state.matchingSessionIds = selectedIds
   state.matchingRightColumnIds = getShuffledItems(selectedIds)
@@ -634,25 +657,17 @@ function pickMixedQuizItems(pool, maxCount) {
 
   const vocabularyItems = pool.filter((item) => item?.source === 'vocabulary')
   const questionItems = pool.filter((item) => item?.source === 'question')
-
-  const shuffledVocabulary = getShuffledItems(vocabularyItems)
-  const shuffledQuestions = getShuffledItems(questionItems)
   const picked = []
 
   // Guarantee at least one question from each source when both sources exist.
-  if (shuffledVocabulary.length && shuffledQuestions.length && maxCount >= 2) {
-    picked.push(shuffledQuestions.pop())
-    picked.push(shuffledVocabulary.pop())
+  if (vocabularyItems.length && questionItems.length && maxCount >= 2) {
+    picked.push(getRandomItems(questionItems, 1)[0])
+    picked.push(getRandomItems(vocabularyItems, 1)[0])
   }
 
-  const remainingPool = getShuffledItems([
-    ...shuffledQuestions,
-    ...shuffledVocabulary,
-  ])
-
-  while (picked.length < maxCount && remainingPool.length) {
-    picked.push(remainingPool.pop())
-  }
+  const pickedKeySet = new Set(picked.map((item) => getMcqItemKey(item)))
+  const remainingPool = pool.filter((item) => !pickedKeySet.has(getMcqItemKey(item)))
+  picked.push(...getRandomItems(remainingPool, maxCount - picked.length))
 
   return getShuffledItems(picked)
 }
@@ -678,7 +693,7 @@ function startMcqQuizRound(options = {}) {
   const maxCount = Math.min(state.mcqQuestionCount || 5, pool.length)
   const baseQuizItems = state.mcqSourceMode === 'mix'
     ? pickMixedQuizItems(pool, maxCount)
-    : getShuffledItems(pool).slice(0, maxCount)
+    : getRandomItems(pool, maxCount)
   const baseKeySet = new Set(baseQuizItems.map((entry) => getMcqItemKey(entry)))
 
   const quizItems = appendWrongQuestions && wrongList.length
