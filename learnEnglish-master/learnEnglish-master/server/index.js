@@ -69,6 +69,23 @@ function getOriginHost(origin) {
   }
 }
 
+function getHostnameFromHost(host) {
+  const value = String(host || '').trim().toLowerCase()
+  if (!value) return ''
+  if (value.startsWith('[')) return value.slice(1, value.indexOf(']'))
+  return value.split(':')[0]
+}
+
+function isLocalHostname(hostname) {
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1'
+}
+
+function isVercelHostname(hostname) {
+  return hostname === 'vercel.app' || hostname.endsWith('.vercel.app')
+}
+
 function getRequestHost(req) {
   return String(req.headers['x-forwarded-host'] || req.headers.host || '')
     .split(',')[0]
@@ -112,7 +129,15 @@ function isAllowedRequestOrigin(req, origin) {
 
   const originHost = getOriginHost(normalizedOrigin).toLowerCase()
   const requestHost = getRequestHost(req)
-  return Boolean(originHost && requestHost && originHost === requestHost)
+  if (!originHost || !requestHost) return false
+  if (originHost === requestHost) return true
+
+  const originHostname = getHostnameFromHost(originHost)
+  const requestHostname = getHostnameFromHost(requestHost)
+  if (isLocalHostname(originHostname) && isLocalHostname(requestHostname)) return true
+  if (isVercelHostname(originHostname) && isVercelHostname(requestHostname)) return true
+
+  return false
 }
 
 app.use((_, res, next) => {
