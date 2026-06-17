@@ -575,8 +575,30 @@ function getRandomItems(items, count) {
   return indexes.map((index) => list[index])
 }
 
+function getUniqueListingQuestionIndexes(totalQuestions = (state.database.questions.listing || []).length) {
+  const items = state.database.questions.listing || []
+  const uniqueIndexes = []
+  const seenKeys = new Set()
+
+  items.forEach((item, index) => {
+    const key = normalizeText(item?.prompt || '')
+    const fallbackKey = `__index_${index}`
+    const questionKey = key || fallbackKey
+    if (seenKeys.has(questionKey)) return
+    seenKeys.add(questionKey)
+    uniqueIndexes.push(index)
+  })
+
+  if (uniqueIndexes.length) return uniqueIndexes
+  const fallbackCount = Math.max(0, Number(totalQuestions) || 0)
+  return Array.from({ length: fallbackCount }, (_, index) => index)
+}
+
 function buildListingSessionIndexes(totalQuestions) {
-  return buildSessionIndexes(totalQuestions, state.listingQuestionCount, totalQuestions)
+  const uniqueIndexes = getUniqueListingQuestionIndexes(totalQuestions)
+  const selectableCount = uniqueIndexes.length
+  const selectedCount = clampQuestionCount(state.listingQuestionCount, selectableCount)
+  return getRandomItems(uniqueIndexes, selectedCount)
 }
 
 function resetListingSession(totalQuestions) {
@@ -1167,6 +1189,7 @@ function scoreListing() {
 
   const scores = getListingPreparedItems().map((item, index) => {
     const userLines = parseWritingSampleLines(state.listingAnswers[index] || '')
+    const totalExpectedIdeas = item.expectedEntries.length
 
     const usedExpectedIndexes = new Set()
     const ideaDetails = userLines.map((userLine) => {
@@ -1192,14 +1215,13 @@ function scoreListing() {
     })
 
     const hitCount = ideaDetails.filter((item) => item.isCorrect).length
-    const totalUserIdeas = userLines.length
-    const percent = totalUserIdeas
-      ? Math.round((hitCount / totalUserIdeas) * 100)
+    const percent = totalExpectedIdeas
+      ? Math.round((hitCount / totalExpectedIdeas) * 100)
       : 0
 
     return {
       hitCount,
-      total: totalUserIdeas,
+      total: totalExpectedIdeas,
       percent,
       ideaDetails,
     }
@@ -2217,14 +2239,13 @@ function renderListingPage() {
   const currentChecked = Boolean(state.listingCheckedMap[activeQuestionIndex])
   const currentShowAnswer = Boolean(state.listingShowAnswerMap[activeQuestionIndex])
   const checkedCount = sessionIndexes.filter((index) => state.listingCheckedMap[index]).length
-  const maxSelectable = Math.max(1, items.length || 1)
+  const maxSelectable = Math.max(1, getUniqueListingQuestionIndexes(items.length).length || items.length || 1)
   const currentSelectable = clampQuestionCount(state.listingQuestionCount, maxSelectable)
   const totalCorrectCount = sessionIndexes.reduce((sum, index) => sum + (scores[index]?.hitCount || 0), 0)
   const totalItemCount = sessionIndexes.reduce((sum, index) => sum + (scores[index]?.total || 0), 0)
   const setupVisible = state.listingSessionPhase !== 'playing' && state.listingSessionPhase !== 'completed'
   const completed = state.listingSessionPhase === 'completed'
-  const answeredCount = sessionIndexes.filter((index) => String(state.listingAnswers[index] || '').trim()).length
-  const canSubmit = totalCount > 0 && answeredCount === totalCount
+  const canSubmit = totalCount > 0
 
   return `
     <section class="page-card">
@@ -2248,7 +2269,7 @@ function renderListingPage() {
                 <span class="question-text">${escapeHtml(currentItem.prompt)}</span>
               </h3>
               <p class="question-hint">${escapeHtml(currentItem.hint || 'Liệt kê các ý theo từng dòng.')}</p>
-              <p class="muted">Mỗi dòng là 1 ý. Bạn có thể qua lại giữa các câu trước khi chấm cả bộ.</p>
+              <p class="muted">Mỗi dòng là 1 ý. Khi kiểm tra, đáp án mẫu sẽ hiện ra để bạn tự đối chiếu.</p>
               <textarea data-listing-index="${activeQuestionIndex}" rows="6" placeholder="- Ý 1&#10;- Ý 2&#10;- Ý 3" ${completed ? 'disabled' : ''}>${escapeHtml(state.listingAnswers[activeQuestionIndex] || '')}</textarea>
               ${completed ? `<p class="muted">Đã khớp: <strong>${currentScore.hitCount}/${currentScore.total}</strong> ý</p>` : ''}
               ${currentChecked
@@ -2287,7 +2308,7 @@ function renderListingPage() {
             <div class="mcq-complete-actions">
               <button type="button" class="small-btn" data-listing-prev ${currentIndex > 0 ? '' : 'disabled'}>Câu trước</button>
               <button type="button" class="small-btn" data-listing-next-question ${currentIndex + 1 < totalCount ? '' : 'disabled'}>Câu kế tiếp</button>
-              <button type="button" class="small-btn" data-listing-check-current ${String(state.listingAnswers[activeQuestionIndex] || '').trim() ? '' : 'disabled'}>Kiểm tra câu này</button>
+              <button type="button" class="small-btn" data-listing-check-current>Kiểm tra câu này</button>
               <button type="button" class="small-btn" data-listing-show-answer>${currentShowAnswer ? 'Ẩn đáp án' : 'Xem đáp án đúng'}</button>
             </div>
             ${completed
@@ -2587,7 +2608,7 @@ function attachExerciseEvents() {
     }
 
     if (target.matches('[data-listing-question-count]')) {
-      state.listingQuestionCount = clampQuestionCount(target.value, (state.database.questions.listing || []).length)
+      state.listingQuestionCount = clampQuestionCount(target.value, getUniqueListingQuestionIndexes().length)
       state.listingSessionIndexes = []
       state.listingSessionPhase = 'setup'
       return
@@ -3036,6 +3057,8 @@ function attachExerciseEvents() {
       if (!state.listingSessionIndexes.length) return
       const activeIndex = state.listingSessionIndexes[state.listingCurrentIndex] ?? 0
       state.listingCheckedMap[activeIndex] = true
+      state.listingShowAnswerMap[activeIndex] = true
+      state.listingScoreDirty = true
       render()
       return
     }

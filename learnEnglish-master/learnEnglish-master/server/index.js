@@ -846,10 +846,9 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
     fetchWritingRows(),
   ])
 
-  const writingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) !== 'listing')
+  const writingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'writing')
   const listingRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'listing')
   const arrangeRows = writingRowsRaw.filter((row) => toWritingKind(row.kind) === 'arrange')
-  const definitionRows = writingRows.filter((row) => toWritingKind(row.kind) === 'writing')
 
   const vocabularyAnswerRows = vocabularyRows
     .map((row) => ({
@@ -932,7 +931,7 @@ async function buildDatabasePayload(mcqSourceModeInput = 'mix') {
       })),
       matching: matchingRows,
       fillBlank: fillRows,
-      writing: definitionRows.map((row) => ({
+      writing: writingRows.map((row) => ({
         id: row.id,
         word: row.word,
         hint: row.hint,
