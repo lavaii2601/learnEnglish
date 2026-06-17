@@ -990,6 +990,23 @@ app.post('/api/questions', async (req, res, next) => {
       assertNoSupabaseError(error, 'Không thể thêm câu hỏi nối từ')
     }
 
+    if (type === 'fillBlank') {
+      const sentence = String(req.body.sentence || '').trim()
+      const answer = String(req.body.answer || '').trim()
+
+      if (!sentence || !answer) {
+        return res.status(400).json({ message: 'Dữ liệu bài điền chỗ trống không hợp lệ' })
+      }
+
+      const { error } = await supabase.from('fill_blank_questions').insert([
+        {
+          sentence,
+          answer,
+        },
+      ])
+      assertNoSupabaseError(error, 'Không thể thêm câu hỏi điền chỗ trống')
+    }
+
     if (type === 'writing') {
       const word = String(req.body.word || '').trim()
       const hint = String(req.body.hint || '').trim()

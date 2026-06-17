@@ -977,8 +977,13 @@ function renderEditDialog() {
   return `
     <div class="edit-overlay" data-close-edit-dialog="true">
       <section class="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-dialog-title">
-        <h3 id="edit-dialog-title">${escapeHtml(title)}</h3>
-        <p class="muted">Chỉnh sửa dữ liệu trực tiếp trong popup, sau đó lưu để cập nhật ngay.</p>
+        <div class="edit-dialog-header">
+          <div>
+            <h3 id="edit-dialog-title">${escapeHtml(title)}</h3>
+            <p class="muted">Chỉnh sửa dữ liệu trực tiếp trong popup, sau đó lưu để cập nhật ngay.</p>
+          </div>
+          <button type="button" class="icon-btn" aria-label="Đóng popup" data-close-edit-dialog="true">&times;</button>
+        </div>
         <form data-edit-dialog-form>
           <input type="hidden" name="kind" value="${escapeHtml(dialog.kind)}" />
           <input type="hidden" name="id" value="${escapeHtml(String(dialog.id || ''))}" />
@@ -2366,6 +2371,7 @@ function renderSourceVocab() {
 
 function renderSourceQuestion() {
   const questionAnswerList = state.database.questions.mcq || []
+  const fillBlankQuestionList = state.database.questions.fillBlank || []
   const writingQuestionList = (state.database.questions.writing || []).map((item) => ({
     id: item.id,
     questionType: 'writing',
@@ -2395,8 +2401,15 @@ function renderSourceQuestion() {
       <h2>Nhiệm vụ: Thêm câu hỏi + câu trả lời</h2>
       <form id="question-form" class="stack-form">
         <p class="muted">Nhập câu hỏi và đáp án để lưu vào cơ sở dữ liệu câu hỏi.</p>
+        <label>
+          Loại câu hỏi
+          <select name="type" required>
+            <option value="mcq">Câu hỏi + đáp án</option>
+            <option value="fillBlank">Điền chỗ trống</option>
+          </select>
+        </label>
         <label>Câu hỏi<input name="question" required placeholder="Ví dụ: Nghĩa của từ resilient là gì?" /></label>
-        <label>Đáp án đúng<input name="answer" required placeholder="Có khả năng phục hồi nhanh sau khó khăn" /></label>
+        <label>Đáp án đúng<input name="answer" required placeholder="Có khả năng phục hồi nhanh sau khó khăn hoặc từ cần điền" /></label>
         <button type="submit">Lưu câu hỏi vào cơ sở dữ liệu</button>
       </form>
 
@@ -2438,14 +2451,36 @@ function renderSourceQuestion() {
                     <p class="muted">Đáp án: ${escapeHtml(item.answer)}</p>
                   </div>
                   <div class="row-actions">
-                    <button type="button" class="small-btn" data-edit-question-answer="${item.id}">Sửa</button>
-                    <button type="button" class="small-btn danger" data-delete-question-answer="${item.id}">Xóa</button>
+                    <button type="button" class="small-btn" data-edit-question="mcq:${item.id}">Sửa</button>
+                    <button type="button" class="small-btn danger" data-delete-question="mcq:${item.id}">Xóa</button>
                   </div>
                 </article>
               `,
             )
             .join('')
           : '<p class="muted">Chưa có câu hỏi/câu trả lời nào.</p>'}
+      </div>
+
+      <h3>Quản lý câu điền chỗ trống (sửa/xóa)</h3>
+      <div class="manage-list">
+        ${fillBlankQuestionList.length
+          ? fillBlankQuestionList
+            .map(
+              (item) => `
+                <article class="manage-card">
+                  <div>
+                    <strong>${escapeHtml(item.sentence)}</strong>
+                    <p class="muted">Đáp án: ${escapeHtml(item.answer)}</p>
+                  </div>
+                  <div class="row-actions">
+                    <button type="button" class="small-btn" data-edit-question="fillBlank:${item.id}">Sửa</button>
+                    <button type="button" class="small-btn danger" data-delete-question="fillBlank:${item.id}">Xóa</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('')
+          : '<p class="muted">Chưa có câu điền chỗ trống nào.</p>'}
       </div>
 
       <h3>Quản lý câu hỏi liệt kê dùng chung (sửa/xóa)</h3>
@@ -3631,11 +3666,23 @@ function attachExerciseEvents() {
 }
 
 function parseQuestionPayload(formData) {
+  const type = String(formData.get('type') || 'mcq').trim()
+  const question = String(formData.get('question') || '').trim()
+  const answer = String(formData.get('answer') || '').trim()
+
+  if (type === 'fillBlank') {
+    return {
+      type: 'fillBlank',
+      sentence: question,
+      answer,
+    }
+  }
+
   return {
     type: 'mcq',
     mode: 'general',
-    question: formData.get('question').trim(),
-    answer: formData.get('answer').trim(),
+    question,
+    answer,
   }
 }
 
